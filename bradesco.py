@@ -43,10 +43,10 @@ def obter_token_bradesco():
 
 token = obter_token_bradesco()
 
-# print("Token:", token)
+print("Token:", token)
 
 params = {
-    "agencia": "0012",
+    "agencia": "1234",
     "conta": "1234567",
     "tipoOperacao": "2"
     
@@ -54,8 +54,8 @@ params = {
 
 
 headers = {
-    "Authorization": f"Bearer {token}",
-    "accept": "application/json"
+    "Authorization": f"Bearer {token}"
+
     
 }
 

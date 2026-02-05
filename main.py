@@ -12,7 +12,6 @@ def looks_like_html(path, nbytes=512):
 	except Exception:
 		return False
 
-
 def read_with_fallback(path):
 	# Try to read as a native Excel file first. If xlrd fails with BOF or
 	# the content looks like HTML, try pandas.read_html as a fallback.
@@ -59,7 +58,7 @@ def pegar_valor_cabecalho(df, linha, col_inicial):
 
     return None
 
-def padronizar_extrato(df):
+def padronizar_extrato_itau(df):
 
     # 1 - achar linha do cabeçalho
     h = None
@@ -128,6 +127,75 @@ def padronizar_extrato(df):
 
     return novo.dropna(how='all')
 
+def padronizar_extrato_santander(df):
+
+    # 1 - achar linha do cabeçalho
+    h = None
+
+    for i, linha in df.iterrows():
+
+        textos = [str(v).lower() for v in linha if pd.notna(v)]
+
+        if ("data" in " ".join(textos) and
+            "saldo" in " ".join(textos)):
+            h = i
+            break
+
+    if h is None:
+        print("Não achei linha de cabeçalho")
+        return None
+
+
+    # 2 - mapear colunas
+    header = df.iloc[h]
+
+    col_data = None
+    col_lanc = None
+    col_valor = None
+    col_saldo = None
+
+    for j, v in header.items():
+        if pd.isna(v):
+            continue
+
+        v = str(v).lower()
+
+        if "data" in v:
+            col_data = j
+
+        elif "hist" in v:
+            col_lanc = j
+
+        elif "valor" in v:
+            col_valor = j
+
+        elif "saldo" in v:
+            col_saldo = j
+
+
+    # 3 - validação
+    if None in (col_data, col_lanc, col_valor, col_saldo):
+        print("Mapeamento falhou:",
+              col_data, col_lanc, col_valor, col_saldo)
+        return None
+
+
+    # 4 - cortar até último saldo
+    linha_fim, _ = ultima_celula_saldo(df, col_saldo)
+
+    dados = df.iloc[h+1 : linha_fim+1]
+
+
+    # 5 - montar dataframe final
+    novo = pd.DataFrame({
+        "Data": dados.iloc[:, col_data],
+        "Lançamento": dados.iloc[:, col_lanc],
+        "Valor": dados.iloc[:, col_valor],
+        "Saldo": dados.iloc[:, col_saldo],
+    })
+
+    return novo.dropna(how='all')
+
 def extrato_para_obj(df):
 	extrato = []
 
@@ -151,37 +219,35 @@ def ultima_celula_saldo(df, coluna):
 
     return None, None
 
-def main():
-	if len(sys.argv) > 1:
-		path = sys.argv[1]
-	else:
-		# default to first .xls/.xlsx in cwd
-		candidates = [f for f in os.listdir('.') if f.lower().endswith(('.xls', '.xlsx'))]
-		if not candidates:
-			print('Nenhum arquivo .xls/.xlsx encontrado na pasta atual. Passe o caminho como argumento.')
-			print('Ex: python main2.py caminho\\para\\seu_arquivo.xls')
-			sys.exit(1)
-		path = candidates[0]
+def separador_lancamentos_tar(objeto_extrato):
+	saldos = []
+	for registro in objeto_extrato:
+		if 'tar' in registro['lancamento'].lower() or 'custas' in registro['lancamento'].lower():
+			saldos.append(registro)
+	return saldos
 
-	print('Lendo arquivo:', path)
+def separador_lancamentos_aplic(objeto_extrato):
+	aplic = []
+	for registro in objeto_extrato:
+		if 'aplic' in registro['lancamento'].lower():
+			aplic.append(registro)
+	return aplic
 
-	if not os.path.exists(path):
-		print('Arquivo não encontrado:', path)
-		sys.exit(1)
+def separador_lancamentos_creditos(objeto_extrato):
+	creditos = []
+	for registro in objeto_extrato:
+		if float(registro['valor']) > 0 and registro['lancamento'].lower() != 'aplic' and "cdb" not in registro['lancamento'].lower() and "aplic" not in registro['lancamento'].lower():
+			creditos.append(registro)
+	return creditos
 
-	try:
-		df = read_with_fallback(path)
-	except Exception as e:
-		print('Erro ao ler o arquivo:', e)
-		print('\nSugestões:')
-		print('- Abra o arquivo no Excel e salve como ".xlsx" (Salvar como -> Pasta de trabalho do Excel).')
-		print('- Se o Excel oferecer recuperação ao abrir, escolha recuperar e depois salve como .xlsx.')
-		print('- Se isso não ajudar, envie o arquivo para análise ou convertê-lo manualmente para um formato suportado.')
-		sys.exit(1)
+def separador_lancamentos_debitos(objeto_extrato):
+	debitos = []
+	for registro in objeto_extrato:
+		if float(registro['valor']) < 0 and 'tar' not in registro['lancamento'].lower():
+			debitos.append(registro)
+	return debitos
 
-	print(df)
-	
-
+def main_itau(df):
 	print("---------------------------------Sheets SALDOS----------------------------------------")
 	nome_loc = localizar_texto_df(df, 'Nome:')
 	
@@ -247,12 +313,149 @@ def main():
 		print(f"Último saldo na coluna 'Saldo (R$)' encontrado na linha {linha_index}: {sdo_final}")
 	else:
 		print("Coluna 'Saldo (R$)' não encontrada.")
-	print(f"\nResumo:\nNome: {nomeCond}\nAgência/Conta: {agenciaContaCond}\nData: {dataCond[:10]}\nSaldo Inicial: {sdo_inicial}\nSaldo Final: {sdo_final}")
+	print(f"\nResumo:\nNome: {nomeCond}\nAgência/Conta: {agenciaContaCond}\nData: {dataCond[:10]}\nSaldo Inicial: {sdo_inicial}\nSaldo Anterior: {sdo_inicial}\nSaldo Final: {sdo_final}")
 	print("---------------------------------Sheets Tarifas----------------------------------------")
 	print("Extrato:")
 	extrato_df = padronizar_extrato(df)
-	print(extrato_para_obj(extrato_df))
+	obj = extrato_para_obj(extrato_df)
+	tarifa = separador_lancamentos_tar(obj)
+	total = 0
+	for registro in tarifa:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total += float(registro['valor'])
+
+	print("Qtde: ", len(tarifa), " Total Tarifas/Custas: ", total.__round__(2))
+
+	aplicacao = separador_lancamentos_aplic(obj)
+	print("---------------------------------Sheets Aplicações----------------------------------------")
+	total_aplic = 0
+	for registro in aplicacao:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total_aplic += float(registro['valor'])
+	print("Qtde: ", len(aplicacao), " Total Aplicações: ", total_aplic.__round__(2))
+
+	creditos = separador_lancamentos_creditos(obj)
+	print("---------------------------------Sheets Créditos----------------------------------------")
+	total_creditos = 0
+	for registro in creditos:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total_creditos += float(registro['valor'])
+	print("Qtde: ", len(creditos), " Total Créditos: ", total_creditos.__round__(2))
     
+	debitos = separador_lancamentos_debitos(obj)
+	print("---------------------------------Sheets Débitos----------------------------------------")
+	total_debitos = 0
+	for registro in debitos:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total_debitos += float(registro['valor'])
+	print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
+
+def main_santander(df):
+	print("---------------------------------Sheets SALDOS----------------------------------------")
+	agencia_loc = localizar_texto_df(df, 'Agencia')
+	agenciaCond = df.loc[agencia_loc[0][0] , agencia_loc[0][1]+ 1]
+
+	conta_loc = localizar_texto_df(df, 'Conta')
+	contaCond = df.loc[conta_loc[0][0] , conta_loc[0][1]+ 1]
+
+
+	agenciaContaCond = f"{agenciaCond.astype(int)}/{contaCond}"
+	print(f"Agência/Conta combinado: {agenciaContaCond}")
+
+
+	
+	
+
+
+
+	saldoAnt_loc = localizar_texto_df(df, 'Saldo Anterior')
+	print(saldoAnt_loc)
+
+	for linha, coluna, valor in saldoAnt_loc:
+		saldoAntCond = pegar_valor_cabecalho(df, linha, coluna)
+		print(f"Saldo Anterior encontrado: {valor}, Valor após: {saldoAntCond}")
+
+	sdo_inicial = saldoAntCond
+	sdo_final = 0
+
+	colunaSaldo = localizar_texto_df(df, 'Saldo (R$)')
+	print(colunaSaldo)
+	if colunaSaldo:
+		
+		coluna_index = colunaSaldo[0][1]
+		linha_index, sdo_final = ultima_celula_saldo(df, coluna_index)
+		print(f"Último saldo na coluna 'Saldo (R$)' encontrado na linha {linha_index}: {sdo_final}")
+	else:
+		print("Coluna 'Saldo (R$)' não encontrada.")
+	print(f"\nResumo:\nAgência/Conta: {agenciaContaCond}\nSaldo Inicial: {sdo_inicial}\nSaldo Anterior: {sdo_inicial}\nSaldo Final: {sdo_final}")
+	print("---------------------------------Sheets Tarifas----------------------------------------")
+	print("Extrato:")
+	extrato_df = padronizar_extrato_santander(df)
+	obj = extrato_para_obj(extrato_df)
+	tarifa = separador_lancamentos_tar(obj)
+	total = 0
+	for registro in tarifa:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total += float(registro['valor'])
+
+	print("Qtde: ", len(tarifa), " Total Tarifas/Custas: ", total.__round__(2))
+
+	aplicacao = separador_lancamentos_aplic(obj)
+	print("---------------------------------Sheets Aplicações----------------------------------------")
+	total_aplic = 0
+	for registro in aplicacao:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total_aplic += float(registro['valor'])
+	print("Qtde: ", len(aplicacao), " Total Aplicações: ", total_aplic.__round__(2))
+
+	creditos = separador_lancamentos_creditos(obj)
+	print("---------------------------------Sheets Créditos----------------------------------------")
+	total_creditos = 0
+	for registro in creditos:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total_creditos += float(registro['valor'])
+	print("Qtde: ", len(creditos), " Total Créditos: ", total_creditos.__round__(2))
+    
+	debitos = separador_lancamentos_debitos(obj)
+	print("---------------------------------Sheets Débitos----------------------------------------")
+	total_debitos = 0
+	for registro in debitos:
+		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
+		total_debitos += float(registro['valor'])
+	print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
+
+
+def main():
+	if len(sys.argv) > 1:
+		path = sys.argv[1]
+	else:
+		# default to first .xls/.xlsx in cwd
+		candidates = [f for f in os.listdir('.') if f.lower().endswith(('.xls', '.xlsx'))]
+		if not candidates:
+			print('Nenhum arquivo .xls/.xlsx encontrado na pasta atual. Passe o caminho como argumento.')
+			print('Ex: python main2.py caminho\\para\\seu_arquivo.xls')
+			sys.exit(1)
+		path = candidates[0]
+
+	print('Lendo arquivo:', path)
+
+	if not os.path.exists(path):
+		print('Arquivo não encontrado:', path)
+		sys.exit(1)
+
+	try:
+		df = read_with_fallback(path)
+	except Exception as e:
+		print('Erro ao ler o arquivo:', e)
+		print('\nSugestões:')
+		print('- Abra o arquivo no Excel e salve como ".xlsx" (Salvar como -> Pasta de trabalho do Excel).')
+		print('- Se o Excel oferecer recuperação ao abrir, escolha recuperar e depois salve como .xlsx.')
+		print('- Se isso não ajudar, envie o arquivo para análise ou convertê-lo manualmente para um formato suportado.')
+		sys.exit(1)
+
+	print(df)
+
+	main_santander(df)
 
 
 if __name__ == '__main__':
