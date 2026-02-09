@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 from openpyxl import load_workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from datetime import datetime
 
 
 
@@ -196,6 +198,118 @@ def padronizar_extrato_santander(df):
 
     return novo.dropna(how='all')
 
+def padronizar_extrato_bradesco(df):
+
+    # 1 - achar linha do cabeçalho
+    h = None
+
+    for i, linha in df.iterrows():
+        textos = [str(v).lower() for v in linha if pd.notna(v)]
+
+        if "data" in " ".join(textos) and "saldo" in " ".join(textos):
+            h = i
+            break
+
+    if h is None:
+        print("Não achei linha de cabeçalho Bradesco")
+        return None
+
+
+    header = df.iloc[h]
+
+
+    # 2 - mapear colunas
+    col_data = None
+    col_lanc = None
+    col_credito = None
+    col_debito = None
+    col_saldo = None
+
+    for j, v in header.items():
+        if pd.isna(v):
+            continue
+
+        v = str(v).lower()
+
+        if "data" in v:
+            col_data = j
+
+        elif "lan" in v or "hist" in v:
+            col_lanc = j
+
+        elif "crédito" in v or "credito" in v:
+            col_credito = j
+
+        elif "débito" in v or "debito" in v:
+            col_debito = j
+
+        elif "saldo" in v:
+            col_saldo = j
+
+
+    if None in (col_data, col_lanc, col_credito, col_debito, col_saldo):
+        print("Mapeamento falhou Bradesco:",
+              col_data, col_lanc, col_credito, col_debito, col_saldo)
+        return None
+
+
+    # 3 - achar linha TOTAL
+    linha_fim = None
+
+    for i in range(h, len(df)):
+        linha = df.iloc[i]
+        textos = [str(v).lower() for v in linha if pd.notna(v)]
+
+        if any("total" in t for t in textos):
+            linha_fim = i
+            break
+
+    if linha_fim is None:
+        print("Não achei linha TOTAL do Bradesco")
+        return None
+
+
+    dados = df.iloc[h+1 : linha_fim].copy()
+
+
+    # 4 - montar valor único com sinal
+    valores = []
+
+    for _, row in dados.iterrows():
+
+        cred = converter_valor_br(row.iloc[col_credito])
+        deb  = -(converter_valor_br(row.iloc[col_debito]))
+
+        valor = cred - deb   # débito vira negativo
+
+        valores.append(valor)
+
+
+    # 5 - montar dataframe final
+    novo = pd.DataFrame({
+        "Data": dados.iloc[:, col_data],
+        "Lançamento": dados.iloc[:, col_lanc],
+        "Valor": valores,
+        "Saldo": dados.iloc[:, col_saldo].apply(converter_valor_br),
+    })
+
+
+    return novo.dropna(how='all')
+
+def converter_valor_br(valor):
+    if pd.isna(valor):
+        return 0.0
+
+    v = str(valor).strip()
+
+    # remove pontos de milhar e troca vírgula por ponto
+    v = v.replace(".", "").replace(",", ".")
+
+    try:
+        return float(v)
+    except:
+        return 0.0
+
 def extrato_para_obj(df):
 	extrato = []
 
@@ -207,6 +321,7 @@ def extrato_para_obj(df):
 			"saldo": linha["Saldo"],
 		}
 		extrato.append(registro)
+            
 
 	return extrato
 
@@ -218,6 +333,39 @@ def ultima_celula_saldo(df, coluna):
             return i, valor
 
     return None, None
+
+def ultima_cedula_saldo_bradesco(df, coluna):
+    df = df.fillna("").astype(str)
+
+    for i, row in df.iterrows():
+        # procura a linha que contém a palavra TOTAL
+        if row.str.contains("total", case=False).any():
+            valor = df.iloc[i, coluna]
+
+            # tratamento de formato brasileiro
+            valor_tratado = str(valor).replace(".", "").replace(",", ".")
+
+            try:
+                return i, float(valor_tratado)
+            except:
+                return i, valor
+
+    return None, None
+    df = df.fillna("").astype(str)
+
+    for i, row in df.iterrows():
+        if row.str.contains("total", case=False).any():
+            valor = df.iloc[i, coluna_saldo]
+
+            # converte para número se estiver com vírgula
+            valor = str(valor).replace(".", "").replace(",", ".")
+
+            try:
+                return float(valor)
+            except:
+                return valor
+
+    return None
 
 def separador_lancamentos_tar(objeto_extrato):
 	saldos = []
@@ -247,12 +395,12 @@ def separador_lancamentos_creditos(objeto_extrato):
 			creditos.append(registro)
 	return creditos
 
-def separador_lancamentos_one_sixty(objeto_extrato):
-	one_sixty = []
+def separador_lancamentos_credito(objeto_extrato):
+	credito = []
 	for registro in objeto_extrato:
 		if 'cr cob' in registro['lancamento'].lower():
-			one_sixty.append(registro)
-	return one_sixty
+			credito.append(registro)
+	return credito
 
 def separador_lancamentos_debitos(objeto_extrato):
 	debitos = []
@@ -455,13 +603,13 @@ def main_santander(df):
 	print("Qtde: ", len(lista_resgate), " Total Resgates: ", total_resgate.__round__(2))
 	print("Resultado Líquido: ", (total_aplic + total_resgate).__round__(2))
 
-	print("---------------------------------Sheets One Sixty----------------------------------------")
-	one_sixty = separador_lancamentos_one_sixty(obj)
-	total_one_sixty = 0
-	for registro in one_sixty:
+	print("---------------------------------Sheets credito----------------------------------------")
+	credito = separador_lancamentos_credito(obj)
+	total_credito = 0
+	for registro in credito:
 		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
-		total_one_sixty += float(registro['valor'])
-	print("Qtde: ", len(one_sixty), " Total One Sixty: ", total_one_sixty.__round__(2))
+		total_credito += float(registro['valor'])
+	print("Qtde: ", len(credito), " Total credito]: ", total_credito.__round__(2))
     
 	debitos = separador_lancamentos_debitos(obj)
 	print("---------------------------------Sheets Débitos----------------------------------------")
@@ -484,7 +632,7 @@ def main_santander(df):
     contamax_aplicacoes=lista_aplicacao,
     contamax_resgates=lista_resgate,
 
-    one_sixty=one_sixty,
+    credito=credito,
 
     debitos=debitos,
 
@@ -494,17 +642,22 @@ def main_santander(df):
 def main_bradesco(df):
 	
 	print("---------------------------------Sheets SALDOS----------------------------------------")
-	nome_loc = localizar_texto_df(df, 'Nome:')
-
+	print(df)
 	agenciaConta_loc = localizar_texto_df(df, 'Agência/Conta:')
 	if not agenciaConta_loc:
 		agencia_loc = localizar_texto_df(df, 'Agência:')
 		conta_loc = localizar_texto_df(df, 'Conta:')
 		for linha, coluna, valor in agencia_loc:
-			agenciaCond = pegar_valor_cabecalho(df, linha, coluna)
+			pos_ag = valor.find("Agência:") + len("Agência:")
+			agenciaCond = valor[pos_ag:pos_ag + 6].strip()
+
 			print(f"Agência encontrado: {valor}, Valor após: {agenciaCond}")
+			
+
+            
 		for linha, coluna, valor in conta_loc:
-			contaCond = pegar_valor_cabecalho(df, linha, coluna)
+			pos_ct = valor.find("Conta:") + len("Conta:")
+			contaCond = valor[pos_ct:pos_ct+10].strip()
 			print(f"Conta encontrada: {valor}, Valor após: {contaCond}")
 		agenciaContaCond = f"{agenciaCond}/{contaCond}"
 		print(f"Agência/Conta combinado: {agenciaContaCond}")
@@ -514,28 +667,13 @@ def main_bradesco(df):
 		agenciaContaCond = pegar_valor_cabecalho(df, linha, coluna)
 		print(f"Agência/Conta encontrado: {valor}, Valor após: {agenciaContaCond}")
 
-
-	
-	
-
-
-
-	data_loc = localizar_texto_df(df, 'Data:')
-	if not data_loc:
-		data_loc = localizar_texto_df(df, 'Atualização:')
-
-
-	print(data_loc)
-	for linha, coluna, valor in data_loc:
-		dataCond = pegar_valor_cabecalho(df, linha, coluna)
-		print(f"Data encontrado: {valor}, Valor após: {dataCond}")
-
 	saldoAnt_loc = localizar_texto_df(df, 'Saldo Anterior')
 	print(saldoAnt_loc)
 
 	for linha, coluna, valor in saldoAnt_loc:
 		saldoAntCond = pegar_valor_cabecalho(df, linha, coluna)
 		print(f"Saldo Anterior encontrado: {valor}, Valor após: {saldoAntCond}")
+		break
 
 	sdo_inicial = saldoAntCond
 	sdo_final = 0
@@ -545,14 +683,14 @@ def main_bradesco(df):
 	if colunaSaldo:
 		
 		coluna_index = colunaSaldo[0][1]
-		linha_index, sdo_final = ultima_celula_saldo(df, coluna_index)
+		linha_index, sdo_final = ultima_cedula_saldo_bradesco(df, coluna_index)
 		print(f"Último saldo na coluna 'Saldo (R$)' encontrado na linha {linha_index}: {sdo_final}")
 	else:
 		print("Coluna 'Saldo (R$)' não encontrada.")
-	print(f"\nResumo:\nNome: {nomeCond}\nAgência/Conta: {agenciaContaCond}\nData: {dataCond[:10]}\nSaldo Inicial: {sdo_inicial}\nSaldo Anterior: {sdo_inicial}\nSaldo Final: {sdo_final}")
+	print(f"\nResumo:\nAgência/Conta: {agenciaContaCond}\nSaldo Inicial: {sdo_inicial}\nSaldo Anterior: {sdo_inicial}\nSaldo Final: {sdo_final}")
 	print("---------------------------------Sheets Tarifas----------------------------------------")
 	print("Extrato:")
-	extrato_df = padronizar_extrato_itau(df)
+	extrato_df = padronizar_extrato_bradesco(df)
 	obj = extrato_para_obj(extrato_df)
 	tarifa = separador_lancamentos_tar(obj)
 	total = 0
@@ -585,14 +723,11 @@ def main_bradesco(df):
 		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
 		total_debitos += float(registro['valor'])
 	print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
-	gerar_excel_itau(
-    nome=nomeCond,
+	gerar_excel_bradesco(
     agencia_conta=agenciaContaCond,
-    periodo=dataCond,
 
     saldo_inicial=sdo_inicial,
     saldo_final=sdo_final,
-
     tarifas=tarifa,
     aplicacoes=aplicacao,
     creditos=creditos,
@@ -600,8 +735,138 @@ def main_bradesco(df):
 	arquivo_origem=df.attrs.get("arquivo_origem")
     )
 
+def gerar_excel_bradesco(
+    agencia_conta,
+    saldo_inicial,
+    saldo_final,
+    tarifas,
+    aplicacoes,
+    creditos,
+    debitos,
+    arquivo_origem
+):
 
+    # ===============================
+    # FUNÇÕES AUXILIARES
+    # ===============================
 
+    def lista_para_df(lista):
+        df = pd.DataFrame(lista)
+    
+        if df.empty:
+            return df
+    
+        df = df.rename(columns={
+            "data": "Data",
+            "lancamento": "Lançamento",
+            "valor": "Valor",
+            "saldo": "Saldo"
+        })
+
+        df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
+        df["Saldo"] = pd.to_numeric(df["Saldo"], errors="coerce")
+
+        return df.dropna(how="all")
+
+    def estilo_padrao(ws):
+        """Aplica o mesmo visual do template Santander/Itaú"""
+
+        header = PatternFill("solid", fgColor="002060")   # azul escuro
+        branco = Font(color="FFFFFF", bold=True)
+
+        borda = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+
+        # Cabeçalho
+        for cell in ws[1]:
+            cell.fill = header
+            cell.font = branco
+            cell.alignment = Alignment(horizontal="center")
+            cell.border = borda
+
+        # Corpo
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.border = borda
+
+        # Ajustar largura
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+
+            for cell in col:
+                try:
+                    max_length = max(max_length, len(str(cell.value)))
+                except:
+                    pass
+
+            ws.column_dimensions[col_letter].width = max_length + 3
+
+    # ===============================
+    # DATAFRAMES
+    # ===============================
+
+    df_tarifas = lista_para_df(tarifas)
+    df_aplic   = lista_para_df(aplicacoes)
+    df_cred    = lista_para_df(creditos)
+    df_deb     = lista_para_df(debitos)
+
+    # ABA RESUMO (igual ao Itaú/Santander)
+    df_resumo = pd.DataFrame([{
+        "Agência/Conta": agencia_conta,
+        "Saldo Inicial": saldo_inicial,
+        "Saldo Final": saldo_final,
+        "Total Tarifas": df_tarifas["Valor"].astype(float).sum() if not df_tarifas.empty else 0,
+        "Total Aplicações": df_aplic["Valor"].astype(float).sum() if not df_aplic.empty else 0,
+        "Total Créditos": df_cred["Valor"].astype(float).sum() if not df_cred.empty else 0,
+        "Total Débitos": df_deb["Valor"].astype(float).sum() if not df_deb.empty else 0,
+        "Arquivo Origem": arquivo_origem or ""
+    }])
+
+    # ===============================
+    # NOME DO ARQUIVO
+    # ===============================
+
+    base = os.path.basename(arquivo_origem)
+    nomeInicial, ext = os.path.splitext(base)
+    nome_arquivo = f"BRADESCO_{arquivo_origem}.xlsx"
+
+    # pegar pasta onde o programa está rodando
+    pasta = os.path.dirname(arquivo_origem)
+
+    caminho = os.path.join(pasta, nome_arquivo)
+
+    # ===============================
+    # GRAVAÇÃO
+    # ===============================
+
+    with pd.ExcelWriter(caminho, engine="openpyxl") as writer:
+
+        df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
+        df_tarifas.to_excel(writer, sheet_name="Tarifas", index=False)
+        df_aplic.to_excel(writer, sheet_name="Aplicacoes", index=False)
+        df_cred.to_excel(writer, sheet_name="Creditos", index=False)
+        df_deb.to_excel(writer, sheet_name="Debitos", index=False)
+
+        wb = writer.book
+
+        for aba in wb.sheetnames:
+            ws = wb[aba]
+            estilo_padrao(ws)
+
+            # Formatar colunas de valor igual Itaú
+            for col in ["C", "D"]:   # Valor e Saldo
+                for cell in ws[col][1:]:
+                    cell.number_format = 'R$ #,##0.00'
+
+    print(f"\n✅ Excel Bradesco gerado no padrão Itaú/Santander:")
+    print(caminho)
+
+    return caminho
 
 def gerar_excel_itau(
     nome,
@@ -843,7 +1108,7 @@ def gerar_excel_santander(
     tarifas,
     contamax_aplicacoes,
     contamax_resgates,
-    one_sixty,
+    credito,
     debitos,
     arquivo_origem
 ):
@@ -1089,9 +1354,9 @@ def gerar_excel_santander(
     ws['C17'].font = Font(name='Arial', size=10, bold=True, color="0000FF")
     ws['C17'].number_format = '#,##0.00'
     
-    ws['B18'] = 'Total One Sixty:'
+    ws['B18'] = 'Total credito]:'
     ws['B18'].font = font_normal
-    ws['C18'] = sum(float(x["valor"]) for x in one_sixty) if one_sixty else 0
+    ws['C18'] = sum(float(x["valor"]) for x in credito) if credito else 0
     ws['C18'].font = Font(name='Arial', size=10, color="008000")
     ws['C18'].number_format = '#,##0.00'
     
@@ -1108,7 +1373,7 @@ def gerar_excel_santander(
     montar_aba("Tarifas", tarifas, "APURAÇÃO TARIFAS BANCÁRIAS", mostrar_saldo=True)
     montar_aba("Contamax_Aplicacoes", contamax_aplicacoes, "CONTAMAX - APLICAÇÕES", mostrar_saldo=True)
     montar_aba("Contamax_Resgates", contamax_resgates, "CONTAMAX - RESGATES", mostrar_saldo=True)
-    montar_aba("One_Sixty", one_sixty, "ONE SIXTY (CR COB)", mostrar_saldo=True)
+    montar_aba("credito", credito, "credito] (CR COB)", mostrar_saldo=True)
     montar_aba("Debitos", debitos, "DÉBITOS", mostrar_saldo=True)
     
     if "Sheet" in wb.sheetnames:
