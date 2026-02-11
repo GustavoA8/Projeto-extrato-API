@@ -3,6 +3,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from datetime import datetime
+from utils import resource_path
 
 
 
@@ -388,21 +389,15 @@ def separador_lancamentos_contamax(objeto_extrato):
 			contamax.append(registro)
 	return contamax
 
-def separador_lancamentos_creditos(objeto_extrato):
-	creditos = []
+def separador_lancamentos_geral(objeto_extrato):
+	geral = []
 	for registro in objeto_extrato:
-		if float(registro['valor']) > 0 and registro['lancamento'].lower() != 'aplic' and "cdb" not in registro['lancamento'].lower() and "aplic" not in registro['lancamento'].lower():
-			creditos.append(registro)
-	return creditos
+		if registro['lancamento'].lower() != 'aplic' and "cdb" not in registro['lancamento'].lower() and "aplic" not in registro['lancamento'].lower():
+			geral.append(registro)
+	return geral
 
-def separador_lancamentos_credito(objeto_extrato):
-	credito = []
-	for registro in objeto_extrato:
-		if 'cr cob' in registro['lancamento'].lower():
-			credito.append(registro)
-	return credito
 
-def separador_lancamentos_debitos(objeto_extrato):
+# def separador_lancamentos_debitos(objeto_extrato):
 	debitos = []
 	for registro in objeto_extrato:
 		if float(registro['valor']) < 0 and 'tar' not in registro['lancamento'].lower() and 'contamax' not in registro['lancamento'].lower():
@@ -526,7 +521,7 @@ def main_itau(df):
 	arquivo_origem=df.attrs.get("arquivo_origem")
     )
 
-def main_santander(df):
+def main_santander(df, condominio):
 	print("---------------------------------Sheets SALDOS----------------------------------------")
 	agencia_loc = localizar_texto_df(df, 'Agencia')
 	agenciaCond = df.loc[agencia_loc[0][0] , agencia_loc[0][1]+ 1]
@@ -603,23 +598,18 @@ def main_santander(df):
 	print("Qtde: ", len(lista_resgate), " Total Resgates: ", total_resgate.__round__(2))
 	print("Resultado Líquido: ", (total_aplic + total_resgate).__round__(2))
 
-	print("---------------------------------Sheets credito----------------------------------------")
-	credito = separador_lancamentos_credito(obj)
+	print("---------------------------------Sheets Debito/Credito----------------------------------------")
+	geral = separador_lancamentos_geral(obj)
 	total_credito = 0
-	for registro in credito:
+	for registro in geral:
 		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
 		total_credito += float(registro['valor'])
-	print("Qtde: ", len(credito), " Total credito]: ", total_credito.__round__(2))
+	print("Qtde: ", len(geral), " Total credito]: ", total_credito.__round__(2))
     
-	debitos = separador_lancamentos_debitos(obj)
-	print("---------------------------------Sheets Débitos----------------------------------------")
-	total_debitos = 0
-	for registro in debitos:
-		print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
-		total_debitos += float(registro['valor'])
-	print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
+
 
 	gerar_excel_santander(
+            condominio=condominio,
     agencia_conta=agenciaContaCond,
 
     periodo="Período não identificado",   # ← você ainda não está extraindo data no Santander
@@ -632,14 +622,12 @@ def main_santander(df):
     contamax_aplicacoes=lista_aplicacao,
     contamax_resgates=lista_resgate,
 
-    credito=credito,
-
-    debitos=debitos,
+    geral=geral,
 
     arquivo_origem=df.attrs.get("arquivo_origem")
 )
 
-def main_bradesco(df):
+def main_bradesco(df, condominio):
 	
 	print("---------------------------------Sheets SALDOS----------------------------------------")
 	print(df)
@@ -724,6 +712,7 @@ def main_bradesco(df):
 		total_debitos += float(registro['valor'])
 	print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
 	gerar_excel_bradesco(
+    condominio=condominio,
     agencia_conta=agenciaContaCond,
 
     saldo_inicial=sdo_inicial,
@@ -736,6 +725,7 @@ def main_bradesco(df):
     )
 
 def gerar_excel_bradesco(
+    condominio,
     agencia_conta,
     saldo_inicial,
     saldo_final,
@@ -745,128 +735,197 @@ def gerar_excel_bradesco(
     debitos,
     arquivo_origem
 ):
+    import os
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.drawing.image import Image
+    from utils import resource_path
 
-    # ===============================
-    # FUNÇÕES AUXILIARES
-    # ===============================
-
-    def lista_para_df(lista):
-        df = pd.DataFrame(lista)
-    
-        if df.empty:
-            return df
-    
-        df = df.rename(columns={
-            "data": "Data",
-            "lancamento": "Lançamento",
-            "valor": "Valor",
-            "saldo": "Saldo"
-        })
-
-        df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
-        df["Saldo"] = pd.to_numeric(df["Saldo"], errors="coerce")
-
-        return df.dropna(how="all")
-
-    def estilo_padrao(ws):
-        """Aplica o mesmo visual do template Santander/Itaú"""
-
-        header = PatternFill("solid", fgColor="002060")   # azul escuro
-        branco = Font(color="FFFFFF", bold=True)
-
-        borda = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-
-        # Cabeçalho
-        for cell in ws[1]:
-            cell.fill = header
-            cell.font = branco
-            cell.alignment = Alignment(horizontal="center")
-            cell.border = borda
-
-        # Corpo
-        for row in ws.iter_rows(min_row=2):
-            for cell in row:
-                cell.border = borda
-
-        # Ajustar largura
-        for col in ws.columns:
-            max_length = 0
-            col_letter = col[0].column_letter
-
-            for cell in col:
-                try:
-                    max_length = max(max_length, len(str(cell.value)))
-                except:
-                    pass
-
-            ws.column_dimensions[col_letter].width = max_length + 3
-
-    # ===============================
-    # DATAFRAMES
-    # ===============================
-
-    df_tarifas = lista_para_df(tarifas)
-    df_aplic   = lista_para_df(aplicacoes)
-    df_cred    = lista_para_df(creditos)
-    df_deb     = lista_para_df(debitos)
-
-    # ABA RESUMO (igual ao Itaú/Santander)
-    df_resumo = pd.DataFrame([{
-        "Agência/Conta": agencia_conta,
-        "Saldo Inicial": saldo_inicial,
-        "Saldo Final": saldo_final,
-        "Total Tarifas": df_tarifas["Valor"].astype(float).sum() if not df_tarifas.empty else 0,
-        "Total Aplicações": df_aplic["Valor"].astype(float).sum() if not df_aplic.empty else 0,
-        "Total Créditos": df_cred["Valor"].astype(float).sum() if not df_cred.empty else 0,
-        "Total Débitos": df_deb["Valor"].astype(float).sum() if not df_deb.empty else 0,
-        "Arquivo Origem": arquivo_origem or ""
-    }])
-
-    # ===============================
-    # NOME DO ARQUIVO
-    # ===============================
+    wb = Workbook()
 
     base = os.path.basename(arquivo_origem)
-    nomeInicial, ext = os.path.splitext(base)
-    nome_arquivo = f"BRADESCO_{arquivo_origem}.xlsx"
-
-    # pegar pasta onde o programa está rodando
+    nome_sem_ext, ext = os.path.splitext(base)
     pasta = os.path.dirname(arquivo_origem)
+    caminho = os.path.join(pasta, f"{nome_sem_ext}_extrato_conciliacao_bradesco.xlsx")
 
-    caminho = os.path.join(pasta, nome_arquivo)
+    # ===================== ESTILOS =====================
 
-    # ===============================
-    # GRAVAÇÃO
-    # ===============================
+    font_titulo = Font(name='Arial', bold=True, size=11, color='FFFFFF')
+    font_normal = Font(name='Arial', size=10)
+    font_cabecalho = Font(name='Arial', bold=True, size=10)
+    font_total = Font(name='Arial', bold=True, size=10)
+    font_negativo = Font(name='Arial', size=10, color="FF0000")
 
-    with pd.ExcelWriter(caminho, engine="openpyxl") as writer:
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+    align_right = Alignment(horizontal="right", vertical="center")
 
-        df_resumo.to_excel(writer, sheet_name="Resumo", index=False)
-        df_tarifas.to_excel(writer, sheet_name="Tarifas", index=False)
-        df_aplic.to_excel(writer, sheet_name="Aplicacoes", index=False)
-        df_cred.to_excel(writer, sheet_name="Creditos", index=False)
-        df_deb.to_excel(writer, sheet_name="Debitos", index=False)
+    borda = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin")
+    )
 
-        wb = writer.book
+    fill_titulo = PatternFill(fill_type='solid', start_color='002060')
+    fill_cabecalho = PatternFill(fill_type='solid', start_color='D9D9D9')
+    fill_total = PatternFill(fill_type='solid', start_color='FFFF00')
+    fill_zebra = PatternFill(fill_type='solid', start_color='F2F2F2')
 
-        for aba in wb.sheetnames:
-            ws = wb[aba]
-            estilo_padrao(ws)
+    # ===================================================
+    # FUNÇÃO PADRÃO DE CRIAÇÃO DAS ABAS
+    # ===================================================
 
-            # Formatar colunas de valor igual Itaú
-            for col in ["C", "D"]:   # Valor e Saldo
-                for cell in ws[col][1:]:
-                    cell.number_format = 'R$ #,##0.00'
+    def montar_aba(nome_aba, lista, titulo):
+
+        ws = wb.create_sheet(nome_aba)
+        ws.sheet_view.showGridLines = False
+
+        # Logo
+        try:
+            img = Image(resource_path("img/logo_bradesco.png"))
+            ws.add_image(img, "A1")
+            ws['C2'] = "Bradesco Net Empresa"
+            ws['C2'].font = Font(bold=True)
+        except:
+            pass
+
+        # Cabeçalho
+        ws.merge_cells("B4:E4")
+        ws["B4"] = titulo
+        ws["B4"].font = Font(name='Arial', bold=True, size=12)
+        ws["B4"].alignment = align_center
+
+        # Condominio
+        ws['C5'] = f"Condomínio: {condominio}"
+        ws['C5'].font = Font(name='Arial', size=10, bold=True)
+
+        # Tabela
+        linha = 6
+        headers = ["Data", "Lançamento", "Valor (R$)", "Saldo (R$)"]
+        cols = ["B", "C", "D", "E"]
+
+        for c, h in zip(cols, headers):
+            cel = ws[f"{c}{linha}"]
+            cel.value = h
+            cel.font = font_cabecalho
+            cel.alignment = align_center
+            cel.fill = fill_cabecalho
+            cel.border = borda
+
+        if not lista:
+            ws["B7"] = "Sem registros"
+            return
+
+        linha += 1
+        inicio = linha
+
+        for i, reg in enumerate(lista):
+
+            valor = float(reg["valor"])
+
+            fill = fill_zebra if i % 2 else PatternFill()
+
+            ws[f"B{linha}"] = reg["data"]
+            ws[f"C{linha}"] = reg["lancamento"]
+            ws[f"D{linha}"] = valor
+            ws[f"E{linha}"] = reg.get("saldo", "")
+
+            ws[f"D{linha}"].font = font_negativo if valor < 0 else font_normal
+
+            for col in cols:
+                ws[f"{col}{linha}"].border = borda
+                ws[f"{col}{linha}"].fill = fill
+
+            ws[f"D{linha}"].number_format = '#,##0.00'
+            ws[f"E{linha}"].number_format = '#,##0.00'
+
+            linha += 1
+
+        # TOTAL
+        ws.merge_cells(f"B{linha}:C{linha}")
+        ws[f"B{linha}"] = "TOTAL"
+        ws[f"B{linha}"].font = font_total
+        ws[f"B{linha}"].fill = fill_total
+        ws[f"B{linha}"].border = borda
+
+        ws[f"D{linha}"] = f"=SUM(D{inicio}:D{linha-1})"
+        ws[f"D{linha}"].number_format = '#,##0.00'
+        ws[f"D{linha}"].font = font_total
+        ws[f"D{linha}"].fill = fill_total
+        ws[f"D{linha}"].border = borda
+
+        ws[f"E{linha}"].fill = fill_total
+        ws[f"E{linha}"].border = borda
+
+        ws.column_dimensions["B"].width = 12
+        ws.column_dimensions["C"].width = 50
+        ws.column_dimensions["D"].width = 18
+        ws.column_dimensions["E"].width = 18
+
+    # ===================================================
+    # ABA RESUMO
+    # ===================================================
+
+    ws = wb.active
+    ws.title = "Resumo"
+    ws.sheet_view.showGridLines = False
+
+    try:
+        img = Image(resource_path("img/logo_bradesco.png"))
+        ws.add_image(img, "A1")
+        ws['C2'] = "Bradesco Net Empresa"
+        ws['C2'].font = Font(bold=True)
+    except:
+        pass
+
+    def linha_resumo(linha, texto, valor=None, cor=None):
+
+        ws[f"B{linha}"] = texto
+        ws[f"B{linha}"].font = font_titulo
+        ws[f"B{linha}"].fill = fill_titulo
+        ws[f"B{linha}"].border = borda
+
+        if valor is not None:
+            ws[f"C{linha}"] = valor
+            ws[f"C{linha}"].number_format = '#,##0.00'
+            ws[f"C{linha}"].border = borda
+
+            if cor:
+                ws[f"C{linha}"].font = Font(color=cor)
+
+    linha_resumo(6, "Condominio:", condominio)
+    linha_resumo(7, "Agência/Conta:", agencia_conta)
+    linha_resumo(8, "Saldo Inicial:", saldo_inicial)
+    linha_resumo(9, "Saldo Final:", saldo_final)
+
+    linha_resumo(11, "Total Tarifas:", sum(float(x["valor"]) for x in tarifas) if tarifas else 0, "FF0000")
+    linha_resumo(13, "Total Aplicações:", sum(float(x["valor"]) for x in aplicacoes) if aplicacoes else 0)
+    linha_resumo(14, "Total Créditos:", sum(float(x["valor"]) for x in creditos) if creditos else 0, "008000")
+    linha_resumo(15, "Total Débitos:", sum(float(x["valor"]) for x in debitos) if debitos else 0, "FF0000")
+
+    ws.column_dimensions["B"].width = 24
+    ws.column_dimensions["C"].width = 18
+
+    # ===================================================
+    # CRIAR ABAS
+    # ===================================================
+
+    montar_aba("Tarifas", tarifas, "APURAÇÃO TARIFAS BANCÁRIAS")
+    montar_aba("Aplicacoes", aplicacoes, "APLICAÇÕES")
+    montar_aba("Creditos", creditos, "CRÉDITOS")
+    montar_aba("Debitos", debitos, "DÉBITOS")
+
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+
+    wb.save(caminho)
 
     print(f"\n✅ Excel Bradesco gerado no padrão Itaú/Santander:")
     print(caminho)
 
     return caminho
+
 
 def gerar_excel_itau(
     nome,
@@ -883,15 +942,18 @@ def gerar_excel_itau(
     import os
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.drawing.image import Image
+    from utils import resource_path
 
     wb = Workbook()
 
     base = os.path.basename(arquivo_origem)
     nome_sem_ext, ext = os.path.splitext(base)
-    caminho = nome_sem_ext + "_extrato_conciliacao.xlsx"
+    pasta = os.path.dirname(arquivo_origem)
+    caminho = os.path.join(pasta, f"{nome_sem_ext}_extrato_conciliacao.xlsx")
 
     # ========== ESTILOS ==========
-    font_titulo = Font(name='Arial', bold=True, size=11)
+    font_titulo = Font(name='Arial', bold=True, size=11, color='FFFFFF')
     font_cabecalho_tabela = Font(name='Arial', bold=True, size=10)
     font_normal = Font(name='Arial', size=10)
     font_total = Font(name='Arial', bold=True, size=10)
@@ -900,6 +962,13 @@ def gerar_excel_itau(
     align_center = Alignment(horizontal="center", vertical="center")
     align_left = Alignment(horizontal="left", vertical="center")
     align_right = Alignment(horizontal="right", vertical="center")
+
+    borda = Border(
+    left=Side(style="thin", color="000000"),
+    right=Side(style="thin", color="000000"),
+    top=Side(style="thin", color="000000"),
+    bottom=Side(style="thin", color="000000")
+)
     
     fill_cabecalho = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
     fill_total = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
@@ -913,6 +982,9 @@ def gerar_excel_itau(
 
     def montar_aba(nome_aba, lista, titulo_secao):
         ws = wb.create_sheet(nome_aba)
+        ws.sheet_view.showGridLines = False
+        img = Image(resource_path("img/itau_header.png"))
+        ws.add_image(img, 'A1')
         
         # Logo/Cabeçalho
         ws.merge_cells('B2:C2')
@@ -923,18 +995,31 @@ def gerar_excel_itau(
         # Informações do cliente
         ws['B5'] = 'Nome:'
         ws['B5'].font = font_titulo
+        ws['B5'].alignment = align_center
+        ws['B5'].fill = PatternFill(fill_type='solid', start_color='1f497d')
         ws['C5'] = nome
         ws['C5'].font = font_normal
         
         ws['D5'] = 'Agência/Conta:'
         ws['D5'].font = font_titulo
+        ws['D5'].alignment = align_center
+        ws['D5'].fill = PatternFill(fill_type='solid', start_color='1f497d')
         ws['E5'] = agencia_conta
         ws['E5'].font = font_normal
+        ws['E5'].border = borda_simples
         
         ws['B6'] = 'Data:'
         ws['B6'].font = font_titulo
+        ws['B6'].alignment = align_center
+        ws['B6'].fill = PatternFill(fill_type='solid', start_color='1f497d')
+        ws['B6'].border = borda_simples
         ws['C6'] = periodo
         ws['C6'].font = font_normal
+        ws['C6'].border = borda_simples
+
+        for linha in range(5, 7):          # 5 até 6
+           for col in ["B", "C"]:         # colunas B e C
+              ws[f"{col}{linha}"].border = borda_simples
         
         # Título da seção
         ws['B9'] = titulo_secao
@@ -1020,29 +1105,53 @@ def gerar_excel_itau(
     # ========== ABA RESUMO ==========
     ws = wb.active
     ws.title = "Resumo"
+
+    ws.sheet_view.showGridLines = False
     
-    ws.merge_cells('B2:D2')
-    ws['B2'] = 'RELATÓRIO DE CONCILIAÇÃO BANCÁRIA - ITAÚ'
-    ws['B2'].font = Font(name='Arial', bold=True, size=13, color="0066CC")
-    ws['B2'].alignment = align_center
+    ws.merge_cells('B2:C2')
+    img = Image(resource_path("img/itau_header.png"))
+    ws.add_image(img, 'A1')
+    ws.row_dimensions[2].height = 40
+    ws.column_dimensions['B'].width = 50
+    ws.column_dimensions['C'].width = 50
+
     
     ws['B4'] = 'Nome:'
     ws['B4'].font = font_titulo
+    ws['B4'].alignment = align_center
+    ws['B4'].fill = PatternFill(fill_type='solid', start_color='1f497d')
     ws['C4'] = nome
     ws['C4'].font = font_normal
     
     ws['B5'] = 'Agência/Conta:'
     ws['B5'].font = font_titulo
+    ws['B5'].alignment = align_center
+    ws['B5'].fill = PatternFill(fill_type='solid', start_color='1f497d')
     ws['C5'] = agencia_conta
     ws['C5'].font = font_normal
     
     ws['B6'] = 'Período:'
     ws['B6'].font = font_titulo
+    ws['B6'].alignment = align_center
+    ws['B6'].fill = PatternFill(fill_type='solid', start_color='1f497d')
     ws['C6'] = periodo
     ws['C6'].font = font_normal
+
+    borda_simples = Border(
+    left=Side(style="thin", color="000000"),
+    right=Side(style="thin", color="000000"),
+    top=Side(style="thin", color="000000"),
+    bottom=Side(style="thin", color="000000")
+    )
+
+    for linha in range(4, 7):          # 4 até 6
+        for col in ["B", "C"]:         # colunas B e C
+            ws[f"{col}{linha}"].border = borda_simples
     
     ws['B8'] = 'SALDOS'
-    ws['B8'].font = Font(name='Arial', bold=True, size=11)
+    ws['B8'].font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
+    ws['B8'].alignment = align_center
+    ws['B8'].fill = PatternFill(fill_type='solid', start_color='1f497d')
     
     ws['B9'] = 'Saldo Inicial:'
     ws['B9'].font = font_normal
@@ -1057,7 +1166,9 @@ def gerar_excel_itau(
     ws['C10'].number_format = '#,##0.00'
     
     ws['B12'] = 'TOTALIZADORES'
-    ws['B12'].font = Font(name='Arial', bold=True, size=11)
+    ws['B12'].font = Font(name='Arial', bold=True , size=11, color='FFFFFF')
+    ws['B12'].alignment = align_center
+    ws['B12'].fill = PatternFill(fill_type='solid', start_color='1f497d')
     
     ws['B13'] = 'Total Tarifas/Custas:'
     ws['B13'].font = font_normal
@@ -1082,6 +1193,21 @@ def gerar_excel_itau(
     ws['C16'] = sum(float(x["valor"]) for x in aplicacoes) if aplicacoes else 0
     ws['C16'].font = font_normal
     ws['C16'].number_format = '#,##0.00'
+
+    ws["B8"].alignment = Alignment(horizontal="center")
+    ws["B12"].alignment = Alignment(horizontal="center")
+
+    # Mesclar títulos
+    ws.merge_cells("B8:C8")
+    ws.merge_cells("B12:C12")
+
+    # Aplicar borda no quadro todo
+    for linha in range(8, 11):
+        for col in ["B", "C"]:
+            ws[f"{col}{linha}"].border = borda
+    for linha in range(12, 17):
+        for col in ["B", "C"]:
+            ws[f"{col}{linha}"].border = borda
     
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 18
@@ -1100,7 +1226,7 @@ def gerar_excel_itau(
 
 
 def gerar_excel_santander(
-    
+    condominio,
     agencia_conta,
     periodo,
     saldo_inicial,
@@ -1115,20 +1241,25 @@ def gerar_excel_santander(
     import os
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.drawing.image import Image
+    from utils import resource_path
 
     wb = Workbook()
 
     base = os.path.basename(arquivo_origem)
     nome_sem_ext, ext = os.path.splitext(base)
-    caminho = nome_sem_ext + "_extrato_conciliacao_santander.xlsx"
+    pasta = os.path.dirname(arquivo_origem)
+    caminho = os.path.join(pasta, f"{nome_sem_ext}_extrato_conciliacao_santander.xlsx")
 
     # ========== ESTILOS SANTANDER ==========
-    font_titulo = Font(name='Arial', bold=True, size=11)
+    font_titulo = Font(name='Arial', bold=True, size=11, color="FFFFFF")
     font_titulo_principal = Font(name='Arial', bold=True, size=14, color="4472C4")
     font_cabecalho_tabela = Font(name='Arial', bold=True, size=10, color="FFFFFF")
     font_normal = Font(name='Arial', size=10)
     font_total = Font(name='Arial', bold=True, size=10)
     font_negativo = Font(name='Arial', size=10, color="FF0000")
+    bgTitulo = PatternFill(fill_type='solid', start_color='002060')
+    bgNormal = PatternFill(fill_type='solid', start_color='808080')
     
     align_center = Alignment(horizontal="center", vertical="center")
     align_left = Alignment(horizontal="left", vertical="center")
@@ -1147,22 +1278,16 @@ def gerar_excel_santander(
 
     def montar_aba(nome_aba, lista, titulo_secao, mostrar_saldo=True):
         ws = wb.create_sheet(nome_aba)
+        ws.sheet_view.showGridLines = False
         
         # Logo Santander
-        ws.merge_cells('B2:C2')
-        ws['B2'] = 'Santander'
-        ws['B2'].font = Font(name='Arial', bold=True, size=14, color="EC0000")
-        ws['B2'].alignment = align_left
-        
-        # Título "Internet Banking Empresarial"
-        ws.merge_cells('D2:F2')
-        ws['D2'] = 'Internet Banking Empresarial'
-        ws['D2'].font = font_titulo_principal
-        ws['D2'].alignment = align_right
+        img = Image(resource_path("img/santander_header.png"))
+        ws.add_image(img,'A1' )
         
         # Nome do condomínio
         ws.merge_cells('B5:C5')
-        ws['B5'].font = font_titulo
+        ws['B5'] = f"Condomínio: {condominio}"
+        ws['B5'].font = Font(name='Arial', bold=True, size=10)
         ws['B5'].alignment = align_left
         
         # Agência e Conta
@@ -1283,88 +1408,123 @@ def gerar_excel_santander(
     # ========== ABA RESUMO ==========
     ws = wb.active
     ws.title = "Resumo"
+    ws.sheet_view.showGridLines = False
     
     # Logo Santander
-    ws.merge_cells('B2:C2')
-    ws['B2'] = 'Santander'
-    ws['B2'].font = Font(name='Arial', bold=True, size=16, color="EC0000")
-    ws['B2'].alignment = align_left
-    
-    # Título principal
-    ws.merge_cells('B3:D3')
-    ws['B3'] = 'RELATÓRIO DE CONCILIAÇÃO BANCÁRIA'
-    ws['B3'].font = Font(name='Arial', bold=True, size=13, color="4472C4")
-    ws['B3'].alignment = align_center
+    img = Image(resource_path("img/santander_header.png"))
+    ws.add_image(img,'A1' )
     
     ws['B5'] = 'Condomínio:'
+    ws['B5'].fill = bgTitulo
     ws['B5'].font = font_titulo
+    ws['B5'].border = border_thin
+    ws['C5'] = condominio
     ws['C5'].font = font_normal
+    ws['C5'].border = border_thin
     
     ws['B6'] = 'Agência/Conta:'
+    ws['B6'].fill = bgTitulo
     ws['B6'].font = font_titulo
+    ws['B6'].border = border_thin
     ws['C6'] = agencia_conta
     ws['C6'].font = font_normal
+    ws['C6'].border = border_thin
     
     ws['B7'] = 'Período:'
+    ws['B7'].fill = bgTitulo
     ws['B7'].font = font_titulo
+    ws['B7'].border = border_thin
     ws['C7'] = periodo
+    ws['C7'].border = border_thin
     ws['C7'].font = font_normal
     
+    ws.merge_cells('B9:C9')
     ws['B9'] = 'SALDOS'
-    ws['B9'].font = Font(name='Arial', bold=True, size=11)
+    ws['B9'].alignment = align_center
+    ws['B9'].fill = bgTitulo
+    ws['B9'].font = Font(name='Arial', bold=True, size=11, color="FFFFFF")
+    ws['B9'].border = border_thin
     
     ws['B10'] = 'Saldo Inicial:'
+    ws['B10'].fill = bgNormal
     ws['B10'].font = font_normal
+    ws['B10'].border = border_thin
     ws['C10'] = saldo_inicial
     ws['C10'].font = font_normal
     ws['C10'].number_format = '#,##0.00'
+    ws['C10'].border = border_thin
     
     ws['B11'] = 'Saldo Final:'
+    ws['B11'].fill = bgNormal
     ws['B11'].font = font_normal
+    ws['B11'].border = border_thin
     ws['C11'] = saldo_final
     ws['C11'].font = font_normal
     ws['C11'].number_format = '#,##0.00'
+    ws['C11'].border = border_thin
     
+    ws.merge_cells('B13:C13')
     ws['B13'] = 'TOTALIZADORES'
-    ws['B13'].font = Font(name='Arial', bold=True, size=11)
+    ws['B13'].alignment = align_center
+    ws['B13'].fill = bgTitulo
+    ws['B13'].font = Font(name='Arial', bold=True, size=11, color="FFFFFF")
+    ws['B13'].border = border_thin
     
     ws['B14'] = 'Total Tarifas/Custas:'
+    ws['B14'].fill = bgNormal
     ws['B14'].font = font_normal
+    ws['B14'].border = border_thin
     ws['C14'] = sum(float(x["valor"]) for x in tarifas) if tarifas else 0
     ws['C14'].font = Font(name='Arial', size=10, color="FF0000")
     ws['C14'].number_format = '#,##0.00'
+    ws['C14'].border = border_thin
     
     ws['B15'] = 'Contamax - Aplicações:'
+    ws['B15'].fill = bgNormal
     ws['B15'].font = font_normal
+    ws['B15'].border = border_thin
     ws['C15'] = sum(float(x["valor"]) for x in contamax_aplicacoes) if contamax_aplicacoes else 0
     ws['C15'].font = Font(name='Arial', size=10, color="FF0000")
     ws['C15'].number_format = '#,##0.00'
+    ws['C15'].border = border_thin
     
     ws['B16'] = 'Contamax - Resgates:'
+    ws['B16'].fill = bgNormal
     ws['B16'].font = font_normal
+    ws['B16'].border = border_thin
     ws['C16'] = sum(float(x["valor"]) for x in contamax_resgates) if contamax_resgates else 0
     ws['C16'].font = Font(name='Arial', size=10, color="008000")
     ws['C16'].number_format = '#,##0.00'
+    ws['C16'].border = border_thin
     
     ws['B17'] = 'Contamax - Resultado:'
-    ws['B17'].font = font_titulo
+    ws['B17'].fill = bgNormal
+    ws['B17'].font = font_normal
+    ws['B17'].border = border_thin
     total_contamax = (sum(float(x["valor"]) for x in contamax_aplicacoes) if contamax_aplicacoes else 0) + \
                      (sum(float(x["valor"]) for x in contamax_resgates) if contamax_resgates else 0)
     ws['C17'] = total_contamax
     ws['C17'].font = Font(name='Arial', size=10, bold=True, color="0000FF")
     ws['C17'].number_format = '#,##0.00'
+    ws['C17'].border = border_thin
     
-    ws['B18'] = 'Total credito]:'
+    ws['B18'] = 'Total credito:'
+    ws['B18'].fill = bgNormal
     ws['B18'].font = font_normal
+    ws['B18'].border = border_thin
     ws['C18'] = sum(float(x["valor"]) for x in credito) if credito else 0
     ws['C18'].font = Font(name='Arial', size=10, color="008000")
     ws['C18'].number_format = '#,##0.00'
+    ws['C18'].border = border_thin
     
     ws['B19'] = 'Total Débitos:'
+    ws['B19'].fill = bgNormal
     ws['B19'].font = font_normal
+    ws['B19'].border = border_thin
     ws['C19'] = sum(float(x["valor"]) for x in debitos) if debitos else 0
     ws['C19'].font = Font(name='Arial', size=10, color="FF0000")
     ws['C19'].number_format = '#,##0.00'
+    ws['C19'].border = border_thin
     
     ws.column_dimensions["B"].width = 25
     ws.column_dimensions["C"].width = 18
