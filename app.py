@@ -23,7 +23,7 @@ class BankReportApp(ctk.CTk):
         
         # Configurações da janela
         self.title("Gerador de Relatórios Bancários")
-        self.geometry("700x550")
+        self.geometry("700x600")
         self.resizable(False, False)
         
         # Centralizar janela
@@ -173,6 +173,19 @@ class BankReportApp(ctk.CTk):
             text_color="#000000"
         )
         btn_gerar.pack(pady=(10, 0))
+        # ===== BOTÃO APLICAÇÃO =====
+        btn_aplicacao = ctk.CTkButton(
+            main_container,
+            text="📂 Gerenciar Aplicações",
+            command=self.abrir_aplicacoes,
+            width=300,
+            height=40,
+            corner_radius=10,
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            fg_color="#4a4a7a",
+            hover_color="#5a5a8a"
+        )
+        btn_aplicacao.pack(pady=(15, 0))
         
         # ===== RODAPÉ =====
         footer_label = ctk.CTkLabel(
@@ -192,7 +205,7 @@ class BankReportApp(ctk.CTk):
             self.entry_condominio.pack(pady=(0, 15), padx=20)
 
          # AUMENTA JANELA
-            self.geometry("700x620")
+            self.geometry("700x670")
 
         else:
              # Esconde campos
@@ -200,9 +213,7 @@ class BankReportApp(ctk.CTk):
             self.entry_condominio.pack_forget()
 
             # VOLTA TAMANHO PADRÃO
-            self.geometry("700x550")
-
-
+            self.geometry("700x600")
 
     def escolher_arquivo(self):
         """Abre diálogo para escolher arquivo Excel"""
@@ -313,6 +324,142 @@ class BankReportApp(ctk.CTk):
             text_color="#a0a0a0"
         )
         self.banco_var.set("Selecione um banco")
+    
+    def abrir_aplicacoes(self):
+        import pandas as pd
+        import sys
+        import os
+        from tkinter import ttk
+    
+        janela = ctk.CTkToplevel(self)
+        janela.title("Gerenciar Aplicações")
+        janela.geometry("800x600")
+        janela.grab_set()
+
+        if getattr(sys, 'frozen', False):
+            base_path = os.path.dirname(sys.executable)
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+
+        caminho = os.path.join(base_path, "grupo-aplic.xlsx")
+        print("CAMINHO REAL:", caminho)
+
+        # ===== TÍTULO =====
+        titulo = ctk.CTkLabel(
+            janela,
+            text="Gerenciar Grupos de Aplicação",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color="#00d9ff"
+        )
+        titulo.pack(pady=20)
+
+        # ===== DROPDOWN BANCO =====
+        banco_var = ctk.StringVar(value="Itau")
+
+        dropdown = ctk.CTkOptionMenu(
+            janela,
+            variable=banco_var,
+            values=["Itau", "Bradesco", "Santander"],
+            width=200
+        )
+        dropdown.pack(pady=10)
+
+        # ===== TABELA =====
+        frame_tabela = ctk.CTkFrame(janela)
+        frame_tabela.pack(fill="both", expand=True, padx=20, pady=20)
+
+        colunas = ("Descrição", "Grupo")
+        tree = ttk.Treeview(frame_tabela, columns=colunas, show="headings")
+
+        for col in colunas:
+            tree.heading(col, text=col)
+            tree.column(col, width=300)
+
+        tree.pack(fill="both", expand=True)
+
+        # ===== FUNÇÃO CARREGAR =====
+        def carregar():
+            tree.delete(*tree.get_children())
+            banco = banco_var.get()
+            df = pd.read_excel(caminho, sheet_name=banco)
+
+            for _, row in df.iterrows():
+                tree.insert("", "end", values=(row["Descrição"], row["Grupo"]))
+
+        dropdown.configure(command=lambda e: carregar())
+
+        # ===== ÁREA ADICIONAR =====
+        frame_add = ctk.CTkFrame(janela)
+        frame_add.pack(pady=10)
+
+        entry_desc = ctk.CTkEntry(frame_add, placeholder_text="Descrição", width=250)
+        entry_desc.grid(row=0, column=0, padx=5)
+
+        entry_grupo = ctk.CTkEntry(frame_add, placeholder_text="Grupo", width=200)
+        entry_grupo.grid(row=0, column=1, padx=5)
+
+        def adicionar():
+            desc = entry_desc.get().strip().upper()
+            grupo = entry_grupo.get().strip()
+
+            if not desc or not grupo:
+                messagebox.showwarning("Aviso", "Preencha todos os campos.")
+                return
+
+            banco = banco_var.get()
+            df = pd.read_excel(caminho, sheet_name=banco)
+
+            if desc in df["Descrição"].values:
+                messagebox.showwarning("Aviso", "Descrição já cadastrada.")
+                return
+
+            novo = pd.DataFrame([{"Descrição": desc, "Grupo": grupo}])
+            df = pd.concat([df, novo], ignore_index=True)
+
+            with pd.ExcelWriter(caminho, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                df.to_excel(writer, sheet_name=banco, index=False)
+
+            carregar()
+            entry_desc.delete(0, "end")
+            entry_grupo.delete(0, "end")
+
+        btn_add = ctk.CTkButton(
+            frame_add,
+            text="Adicionar",
+            command=adicionar,
+            fg_color="green"
+        )
+        btn_add.grid(row=0, column=2, padx=5)
+
+        # ===== EXCLUIR =====
+        def excluir():
+            selecionado = tree.selection()
+            if not selecionado:
+                messagebox.showwarning("Aviso", "Selecione um item.")
+                return
+
+            valores = tree.item(selecionado)["values"]
+            desc = valores[0]
+
+            banco = banco_var.get()
+            df = pd.read_excel(caminho, sheet_name=banco)
+
+            df = df[df["Descrição"] != desc]
+
+            with pd.ExcelWriter(caminho, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                df.to_excel(writer, sheet_name=banco, index=False)
+
+            carregar()
+
+        btn_del = ctk.CTkButton(
+            janela,
+            text="Excluir Selecionado",
+            command=excluir,
+            fg_color="red"
+        )
+        btn_del.pack(pady=10)
+
+        carregar()
 
 
 def main():

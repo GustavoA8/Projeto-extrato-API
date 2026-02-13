@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -42,7 +43,11 @@ def read_with_fallback(path):
             raise
 
 def carregar_mapa_grupos(banco):
-    caminho = resource_path("grupo-aplic.xlsx")
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    caminho = os.path.join(base_path, "grupo-aplic.xlsx")
 
     df_mapa = pd.read_excel(caminho, sheet_name=banco)
 
@@ -1112,7 +1117,6 @@ def gerar_excel_bradesco(
 
     return caminho
 
-
 def gerar_excel_itau(
     nome,
     agencia_conta,
@@ -1549,7 +1553,6 @@ def gerar_excel_itau(
     
     wb.save(caminho)
     print(f"Arquivo Itaú estilizado gerado: {caminho}")
-
 
 def gerar_excel_santander(
     condominio,
