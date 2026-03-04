@@ -495,7 +495,7 @@ def main_itau(df):
 
 
 
-    data_loc = localizar_texto_df(df, 'Data:')
+    data_loc = localizar_texto_df(df, 'Periodo:')
     if not data_loc:
         data_loc = localizar_texto_df(df, 'Atualização:')
 
@@ -1172,11 +1172,39 @@ def gerar_excel_itau(
         bottom=Side(style="thin", color="000000")
     )
 
+    def configurar_impressao(ws, ultima_linha):
+        # 📄 Papel A4
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+
+        # 📄 Orientação
+        ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        # se quiser retrato: ws.ORIENTATION_PORTRAIT
+
+        # 📄 Ajustar para caber em 1 página (largura)
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = False  # não força altura
+
+        # 📄 Centralizar
+        ws.print_options.horizontalCentered = True
+        ws.print_options.verticalCentered = False
+
+        # 📄 Margens
+        ws.page_margins.left = 0.3
+        ws.page_margins.right = 0.3
+        ws.page_margins.top = 0.5
+        ws.page_margins.bottom = 0.5
+
+        # 📄 Área de impressão (ajusta automático)
+        ws.print_area = f'B1:E{ultima_linha}'
+
+        # 📄 Repetir cabeçalho da tabela (linha 12 no seu caso)
+        ws.print_title_rows = '12:12'
+
     def montar_aba(nome_aba, lista, titulo_secao):
         ws = wb.create_sheet(nome_aba)
         ws.sheet_view.showGridLines = False
         img = Image(resource_path("img/itau_header.png"))
-        ws.add_image(img, 'A1')
+        ws.add_image(img, 'B1')
         
         # Logo/Cabeçalho
         ws.merge_cells('B2:C2')
@@ -1220,6 +1248,7 @@ def gerar_excel_itau(
         # Cabeçalho da tabela
         linha = 12
         headers = ["Data", "Lançamento", "Credito (R$)", "Debito (R$)"]
+        
         colunas_letra = ["B", "C", "D", "E"]
         
         for col, texto in zip(colunas_letra, headers):
@@ -1279,6 +1308,7 @@ def gerar_excel_itau(
         ws[f"B{linha}"].alignment = align_center
         ws[f"B{linha}"].fill = fill_total
         ws[f"B{linha}"].border = border_thin
+        ws[f"C{linha}"].border = border_thin
         
         ws[f"D{linha}"] = f'=SUM(D{linha_inicio_dados}:D{linha-1})'
         ws[f"D{linha}"].font = font_total
@@ -1293,6 +1323,38 @@ def gerar_excel_itau(
         ws[f"E{linha}"].number_format = '#,##0.00'
         ws[f"E{linha}"].fill = fill_total
         ws[f"E{linha}"].border = border_thin
+
+        linha_total = linha
+        linha += 2  # pula uma linha
+        # ==========================
+        # SALDOS (somente para aba GERAL)
+        # ==========================
+        if nome_aba == "Geral":
+        
+            ws[f'B{linha}'] = 'Saldo Inicial:'
+            ws[f'B{linha}'].font = font_normal
+            ws[f"B{linha}"].border = border_thin
+        
+            ws[f'C{linha}'] = saldo_inicial
+            ws[f'C{linha}'].font = font_normal
+            ws[f'C{linha}'].number_format = '#,##0.00'
+            ws[f"C{linha}"].border = border_thin
+
+            linha += 1
+
+            ws[f'B{linha}'] = 'Saldo Final:'
+            ws[f'B{linha}'].font = font_normal
+            ws[f"B{linha}"].border = border_thin
+
+            ws[f'C{linha}'] = saldo_final
+            ws[f'C{linha}'].font = font_normal
+            ws[f'C{linha}'].number_format = '#,##0.00'
+            ws[f"C{linha}"].border = border_thin
+
+            linha += 1
+
+        
+
         
         # Ajustar larguras
         ws.column_dimensions["B"].width = 12
@@ -1300,12 +1362,25 @@ def gerar_excel_itau(
         ws.column_dimensions["D"].width = 18
         ws.column_dimensions["E"].width = 18
 
-    def montar_aba_grupos(nome_aba, grupos_dict, titulo_secao):
+        #configuração de impressão
+
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = False
+
+        ws.page_margins.left = 0.3
+        ws.page_margins.right = 0.3
+        ws.page_margins.top = 0.5
+        ws.page_margins.bottom = 0.5
+
+        configurar_impressao(ws, linha)
+
+    def montar_aba_grupos(nome_aba, grupos_dict, titulo_secao, mapa_saldos_resumo=None):
 
          ws = wb.create_sheet(nome_aba)
          ws.sheet_view.showGridLines = False
          img = Image(resource_path("img/itau_header.png"))
-         ws.add_image(img, 'A1')
+         ws.add_image(img, 'B1')
 
          # Cabeçalho Itaú
          ws.merge_cells('B2:C2')
@@ -1336,6 +1411,8 @@ def gerar_excel_itau(
          ws['C6'] = periodo
          ws['C6'].font = font_normal
 
+         
+
          for linha in range(5, 7):
              for col in ["B", "C", "D", "E"]:
                  ws[f"{col}{linha}"].border = borda
@@ -1357,6 +1434,8 @@ def gerar_excel_itau(
 
              # 🔹 Cabeçalho tabela
              headers = ["Data", "Lançamento", "Valor (R$)", "Saldo (R$)"]
+             if nome_aba == "Aplicacoes":
+                headers = ["Data", "Lançamento", "Aplicação (R$)", "Resgate (R$)"]
              colunas = ["B", "C", "D", "E"]
 
              for col, texto in zip(colunas, headers):
@@ -1411,6 +1490,7 @@ def gerar_excel_itau(
              ws[f"B{linha}"].alignment = align_center
              ws[f"B{linha}"].fill = fill_total
              ws[f"B{linha}"].border = border_thin
+             ws[f"C{linha}"].border = border_thin
 
              ws[f"D{linha}"] = f'=SUM(D{linha_inicio_dados}:D{linha-1})'
              ws[f"D{linha}"].font = font_total
@@ -1418,29 +1498,91 @@ def gerar_excel_itau(
              ws[f"D{linha}"].number_format = '#,##0.00'
              ws[f"D{linha}"].fill = fill_total
              ws[f"D{linha}"].border = border_thin
+             aplicacaoTotal = "D" + str(linha)
 
+             ws[f"E{linha}"] = f'=SUM(E{linha_inicio_dados}:E{linha-1})'
+             ws[f"E{linha}"].font = font_total
+             ws[f"E{linha}"].alignment = align_right
+             ws[f"E{linha}"].number_format = '#,##0.00'
              ws[f"E{linha}"].fill = fill_total
              ws[f"E{linha}"].border = border_thin
+             resgateTotal = "E" + str(linha)
 
-             linha += 3
+             # ======================================================
+             # SALDOS (APENAS PARA ABA APLICACOES)
+             # ======================================================
+             if nome_aba == "Aplicacoes" and mapa_saldos_resumo:
+                 print(f"Calculando saldos para o grupo '{nome_grupo}'...")
+
+                 saldoInicial = mapa_saldos_resumo[nome_grupo]["saldo_inicial"]
+                 saldoFinal = mapa_saldos_resumo[nome_grupo]["saldo_final"]
+
+                 linha += 1
+
+                 # Saldo Inicial
+                 ws[f'D{linha}'] = 'Saldo Inicial:'
+                 ws[f'D{linha}'].font = font_normal
+                 ws[f"D{linha}"].border = border_thin
+
+                 ws[f'E{linha}'] = f"=Resumo!{saldoInicial}"
+                 ws[f'E{linha}'].number_format = '#,##0.00'
+                 ws[f"E{linha}"].border = border_thin
+
+                 linha += 1
+
+                 # Saldo Final
+                 ws[f'D{linha}'] = 'Saldo Final:'
+                 ws[f'D{linha}'].font = font_normal
+                 ws[f"D{linha}"].border = border_thin
+
+                 ws[f'E{linha}'] = f"=Resumo!{saldoFinal}"
+                 ws[f'E{linha}'].number_format = '#,##0.00'
+                 ws[f"E{linha}"].border = border_thin
+
+                 linha += 1
+
+    # Rendimento
+                 ws[f'D{linha}'] = 'Rendimento:'
+                 ws[f'D{linha}'].font = font_normal
+                 ws[f"D{linha}"].border = border_thin
+
+                 ws[f'E{linha}'] = (
+                     f"=Resumo!{saldoFinal}"
+                     f"-(Resumo!{saldoInicial}"
+                     f"+{aplicacaoTotal}-{resgateTotal})"
+                 )
+                 ws[f'E{linha}'].number_format = '#,##0.00'
+                 ws[f"E{linha}"].border = border_thin
+
+                 linha += 2             
+             ws[f'E{linha}'].font = font_normal
+             ws[f'E{linha}'].number_format = '#,##0.00'
+             ws[f"E{linha}"].border = border_thin
 
          ws.column_dimensions["B"].width = 12
          ws.column_dimensions["C"].width = 50
          ws.column_dimensions["D"].width = 18
          ws.column_dimensions["E"].width = 18
+
+         configurar_impressao(ws, linha)
      
     # ========== ABA RESUMO ==========
+    aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Itau")
+    
+
     ws = wb.active
     ws.title = "Resumo"
 
     ws.sheet_view.showGridLines = False
+    mapa_saldos_resumo = {}
+
     
     ws.merge_cells('B2:C2')
     img = Image(resource_path("img/itau_header.png"))
-    ws.add_image(img, 'A1')
+    ws.add_image(img, 'B1')
     ws.row_dimensions[2].height = 40
     ws.column_dimensions['B'].width = 50
-    ws.column_dimensions['C'].width = 50
+    ws.column_dimensions['C'].width = 80
 
     
     ws['B4'] = 'Nome:'
@@ -1537,15 +1679,68 @@ def gerar_excel_itau(
             ws[f"{col}{linha}"].border = borda
     
     ws.column_dimensions["B"].width = 22
-    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["C"].width = 30
 
-    aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Itau")
+    linha_resumo = 18  # começa depois da parte que já existe
+
+    ws[f"B{linha_resumo}"] = "APLICAÇÕES"
+    ws[f"B{linha_resumo}"].font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
+    ws[f"B{linha_resumo}"].fill = PatternFill(fill_type='solid', start_color='1f497d')
+    ws[f"B{linha_resumo}"].border = border_thin
+    ws[f"B{linha_resumo}"].alignment = align_center
+    ws.merge_cells(f"B{linha_resumo}:C{linha_resumo}")
+
+    linha_resumo += 2
+
+    for nome_grupo in aplicacoes_por_grupo.keys():
+
+        # 🔹 Nome da aplicação
+        ws[f"B{linha_resumo}"] = nome_grupo
+        ws[f"B{linha_resumo}"].font = Font(name='Arial', bold=True, size=10)
+        ws.merge_cells(f"B{linha_resumo}:C{linha_resumo}")
+        ws[f"B{linha_resumo}"].border = border_thin
+        ws[f"C{linha_resumo}"].border = border_thin
+        
+
+        linha_resumo += 1
+
+        # 🔹 Saldo Inicial
+        ws[f"B{linha_resumo}"] = "Saldo Inicial:"
+        ws[f"C{linha_resumo}"] = 0
+        ws[f"C{linha_resumo}"].number_format = '#,##0.00'
+
+        ws[f"B{linha_resumo}"].border = border_thin
+        ws[f"C{linha_resumo}"].border = border_thin
+
+        saldo_inicial_cell = f"C{linha_resumo}"
+        linha_resumo += 1
+
+        # 🔹 Saldo Final
+        ws[f"B{linha_resumo}"] = "Saldo Final:"
+        ws[f"C{linha_resumo}"] = 0
+        ws[f"C{linha_resumo}"].number_format = '#,##0.00'
+
+        ws[f"B{linha_resumo}"].border = border_thin
+        ws[f"C{linha_resumo}"].border = border_thin
+
+        saldo_final_cell = f"C{linha_resumo}"
+
+        # Armazenar os valores das células de saldo inicial e final no mapa
+        mapa_saldos_resumo[nome_grupo] = {
+            "saldo_inicial": saldo_inicial_cell,
+            "saldo_final": saldo_final_cell
+        }
+
+        linha_resumo += 2    
+
+    configurar_impressao(ws, 18)
+
     
 
 
     # ========== CRIAR ABAS ==========
     montar_aba("Tarifas", tarifas, "APURAÇÃO TARIFAS BANCÁRIAS")
-    montar_aba_grupos("Aplicacoes",aplicacoes_por_grupo , "APLICAÇÕES")
+    montar_aba_grupos("Aplicacoes",aplicacoes_por_grupo , "APLICAÇÕES", mapa_saldos_resumo)
     montar_aba("Geral", lancamentos_gerais, "GERAL")
     
     if "Sheet" in wb.sheetnames:
