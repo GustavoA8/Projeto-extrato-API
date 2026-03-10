@@ -1201,6 +1201,8 @@ def gerar_excel_itau(
         ws.print_title_rows = '12:12'
 
     def montar_aba(nome_aba, lista, titulo_secao):
+        creditos_lista = [x for x in lista if float(x["valor"]) > 0]
+        debitos_lista = [x for x in lista if float(x["valor"]) < 0]
         ws = wb.create_sheet(nome_aba)
         ws.sheet_view.showGridLines = False
         img = Image(resource_path("img/itau_header.png"))
@@ -1247,85 +1249,125 @@ def gerar_excel_itau(
         
         # Cabeçalho da tabela
         linha = 12
-        headers = ["Data", "Lançamento", "Credito (R$)", "Debito (R$)"]
-        
-        colunas_letra = ["B", "C", "D", "E"]
-        
-        for col, texto in zip(colunas_letra, headers):
-            cell = ws[f"{col}{linha}"]
-            cell.value = texto
-            cell.font = font_cabecalho_tabela
-            cell.alignment = align_center
-            cell.fill = fill_cabecalho
-            cell.border = border_thin
-        
-        if not lista:
-            ws[f"B{linha+1}"] = "Sem registros para esta categoria"
-            ws[f"B{linha+1}"].font = Font(name='Arial', italic=True, size=10)
-            ws.column_dimensions["B"].width = 12
-            ws.column_dimensions["C"].width = 50
-            ws.column_dimensions["D"].width = 18
-            ws.column_dimensions["E"].width = 18
-            return
-        
-        # Dados
-        linha += 1
-        linha_inicio_dados = linha
-        
-        for reg in lista:
-            valor = float(reg["valor"])
-            
-            ws[f"B{linha}"] = reg["data"]
-            ws[f"B{linha}"].font = font_normal
-            ws[f"B{linha}"].alignment = align_center
-            ws[f"B{linha}"].border = border_thin
-            
-            ws[f"C{linha}"] = reg["lancamento"]
-            ws[f"C{linha}"].font = font_normal
-            ws[f"C{linha}"].alignment = align_left
-            ws[f"C{linha}"].border = border_thin
-            
-            if valor > 0:
-                ws[f"D{linha}"] = valor
-                ws[f"D{linha}"].font = font_normal
-            elif valor < 0:
-                ws[f"E{linha}"] = valor
-                ws[f"E{linha}"].font = font_negativo
-            
-           
-            ws[f"E{linha}"].alignment = align_right
-            ws[f"E{linha}"].number_format = '#,##0.00'
-            ws[f"E{linha}"].border = border_thin
-            ws[f"D{linha}"].alignment = align_right
-            ws[f"D{linha}"].number_format = '#,##0.00'
-            ws[f"D{linha}"].border = border_thin
-            linha += 1
-        
-        # Linha de TOTAL
-        ws.merge_cells(f'B{linha}:C{linha}')
-        ws[f"B{linha}"] = "TOTAL"
-        ws[f"B{linha}"].font = font_total
-        ws[f"B{linha}"].alignment = align_center
-        ws[f"B{linha}"].fill = fill_total
-        ws[f"B{linha}"].border = border_thin
-        ws[f"C{linha}"].border = border_thin
-        
-        ws[f"D{linha}"] = f'=SUM(D{linha_inicio_dados}:D{linha-1})'
-        ws[f"D{linha}"].font = font_total
-        ws[f"D{linha}"].alignment = align_right
-        ws[f"D{linha}"].number_format = '#,##0.00'
-        ws[f"D{linha}"].fill = fill_total
-        ws[f"D{linha}"].border = border_thin
-        
-        ws[f"E{linha}"] = f'=SUM(E{linha_inicio_dados}:E{linha-1})'
-        ws[f"E{linha}"].font = font_total
-        ws[f"E{linha}"].alignment = align_right
-        ws[f"E{linha}"].number_format = '#,##0.00'
-        ws[f"E{linha}"].fill = fill_total
-        ws[f"E{linha}"].border = border_thin
 
-        linha_total = linha
-        linha += 2  # pula uma linha
+     # =============================
+    # Separação de créditos/debitos
+    # =============================
+        if nome_aba == "Geral":
+
+         creditos_lista = [x for x in lista if float(x["valor"]) > 0]
+         debitos_lista = [x for x in lista if float(x["valor"]) < 0]
+
+         listas = [
+             ("CRÉDITOS", creditos_lista),
+            ("DÉBITOS", debitos_lista)
+         ]
+
+        else:
+         listas = [(titulo_secao, lista)]
+
+
+
+        for titulo, dados in listas:
+          
+          if nome_aba == "Geral":
+              ws[f"B{linha-2}"] = titulo
+          
+              ws[f"B{linha-2}"].font = Font(name='Arial', bold=True, size=11)
+
+          if nome_aba == "Tarifas":
+              headers = ["Data", "Lançamento", "Debito (R$)"]
+              colunas = ["B", "C", "D"]
+          else:
+              headers = ["Data", "Lançamento", "Credito (R$)", "Debito (R$)"]
+              colunas = ["B", "C", "D", "E"]
+
+          
+
+          for col, texto in zip(colunas, headers):
+
+              cell = ws[f"{col}{linha}"]
+              cell.value = texto
+              cell.font = font_cabecalho_tabela
+              cell.alignment = align_center
+              cell.fill = fill_cabecalho
+              cell.border = border_thin
+
+          linha += 1
+
+          if not dados:
+
+              ws[f"B{linha}"] = "Sem registros para esta categoria"
+              ws[f"B{linha}"].font = Font(name='Arial', italic=True, size=10)
+              linha += 2
+              continue
+
+          linha_inicio_dados = linha
+
+          for reg in dados:
+
+              valor = float(reg["valor"])
+  
+              ws[f"B{linha}"] = reg["data"]
+              ws[f"B{linha}"].font = font_normal
+              ws[f"B{linha}"].alignment = align_center
+              ws[f"B{linha}"].border = border_thin
+
+              ws[f"C{linha}"] = reg["lancamento"]
+              ws[f"C{linha}"].font = font_normal
+              ws[f"C{linha}"].alignment = align_left
+              ws[f"C{linha}"].border = border_thin
+
+              if nome_aba == "Tarifas":
+
+                  ws[f"D{linha}"] = valor
+                  ws[f"D{linha}"].font = font_negativo
+  
+              else:
+                  if valor > 0:
+                      ws[f"E{linha}"] = valor
+                      ws[f"E{linha}"].font = font_normal
+                  else:
+                      ws[f"E{linha}"] = valor
+                      ws[f"E{linha}"].font = font_negativo
+
+              ws[f"D{linha}"].alignment = align_right
+              ws[f"D{linha}"].number_format = '#,##0.00'
+              ws[f"D{linha}"].border = border_thin
+
+              ws[f"E{linha}"].alignment = align_right
+              ws[f"E{linha}"].number_format = '#,##0.00'
+              ws[f"E{linha}"].border = border_thin
+
+              linha += 1
+
+        # TOTAL
+          ws.merge_cells(f'B{linha}:C{linha}')
+
+          ws[f"B{linha}"] = "TOTAL"
+          ws[f"B{linha}"].font = font_total
+          ws[f"B{linha}"].alignment = align_center
+          ws[f"B{linha}"].fill = fill_total
+          ws[f"B{linha}"].border = border_thin
+
+          ws[f"C{linha}"].border = border_thin
+
+          ws[f"D{linha}"] = f'=SUM(D{linha_inicio_dados}:D{linha-1})'
+          ws[f"D{linha}"].font = font_total
+          ws[f"D{linha}"].alignment = align_right
+          ws[f"D{linha}"].number_format = '#,##0.00'
+          ws[f"D{linha}"].fill = fill_total
+          ws[f"D{linha}"].border = border_thin
+
+          if nome_aba != "Tarifas":
+              ws[f"E{linha}"] = f'=SUM(E{linha_inicio_dados}:E{linha-1})'
+              ws[f"E{linha}"].font = font_total
+              ws[f"E{linha}"].alignment = align_right
+              ws[f"E{linha}"].number_format = '#,##0.00'
+              ws[f"E{linha}"].fill = fill_total
+              ws[f"E{linha}"].border = border_thin
+
+          linha += 3
         # ==========================
         # SALDOS (somente para aba GERAL)
         # ==========================
@@ -1469,13 +1511,16 @@ def gerar_excel_itau(
                  ws[f"C{linha}"].alignment = align_left
                  ws[f"C{linha}"].border = border_thin
 
-                 ws[f"D{linha}"] = valor
-                 ws[f"D{linha}"].font = font_negativo if valor < 0 else font_normal
+                 if valor < 0:
+                     ws[f"D{linha}"] = valor
+                     
+                 ws[f"D{linha}"].font = font_negativo 
                  ws[f"D{linha}"].alignment = align_right
                  ws[f"D{linha}"].number_format = '#,##0.00'
                  ws[f"D{linha}"].border = border_thin
 
-                 ws[f"E{linha}"] = reg.get("saldo", "")
+                 if valor > 0:
+                     ws[f"E{linha}"] = valor
                  ws[f"E{linha}"].font = font_normal
                  ws[f"E{linha}"].alignment = align_right
                  ws[f"E{linha}"].number_format = '#,##0.00'
@@ -1541,7 +1586,7 @@ def gerar_excel_itau(
 
                  linha += 1
 
-    # Rendimento
+                 # Rendimento
                  ws[f'D{linha}'] = 'Rendimento:'
                  ws[f'D{linha}'].font = font_normal
                  ws[f"D{linha}"].border = border_thin
@@ -1549,7 +1594,7 @@ def gerar_excel_itau(
                  ws[f'E{linha}'] = (
                      f"=Resumo!{saldoFinal}"
                      f"-(Resumo!{saldoInicial}"
-                     f"+{aplicacaoTotal}-{resgateTotal})"
+                     f"+(-{aplicacaoTotal})-{resgateTotal})"
                  )
                  ws[f'E{linha}'].number_format = '#,##0.00'
                  ws[f"E{linha}"].border = border_thin
@@ -1582,7 +1627,7 @@ def gerar_excel_itau(
     ws.add_image(img, 'B1')
     ws.row_dimensions[2].height = 40
     ws.column_dimensions['B'].width = 50
-    ws.column_dimensions['C'].width = 80
+    ws.column_dimensions['C'].width = 90
 
     
     ws['B4'] = 'Nome:'
