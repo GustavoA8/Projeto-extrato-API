@@ -1177,7 +1177,7 @@ def gerar_excel_itau(
         ws.page_setup.paperSize = ws.PAPERSIZE_A4
 
         # 📄 Orientação
-        ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
         # se quiser retrato: ws.ORIENTATION_PORTRAIT
 
         # 📄 Ajustar para caber em 1 página (largura)
@@ -1269,6 +1269,8 @@ def gerar_excel_itau(
 
 
         for titulo, dados in listas:
+          tem_credito = any(float(x["valor"]) > 0 for x in dados)
+          tem_debito = any(float(x["valor"]) < 0 for x in dados)
           
           if nome_aba == "Geral":
               ws[f"B{linha-2}"] = titulo
@@ -1279,8 +1281,15 @@ def gerar_excel_itau(
               headers = ["Data", "Lançamento", "Debito (R$)"]
               colunas = ["B", "C", "D"]
           else:
-              headers = ["Data", "Lançamento", "Credito (R$)", "Debito (R$)"]
-              colunas = ["B", "C", "D", "E"]
+              if tem_credito and tem_debito:
+                  headers = ["Data", "Lançamento", "Credito (R$)", "Debito (R$)"]
+                  colunas = ["B", "C", "D", "E"]
+              elif tem_credito:
+                  headers = ["Data", "Lançamento", "Credito (R$)"]
+                  colunas = ["B", "C", "D"]
+              else:
+                  headers = ["Data", "Lançamento", "Debito (R$)"]
+                  colunas = ["B", "C", "D"]
 
           
 
@@ -1324,20 +1333,28 @@ def gerar_excel_itau(
                   ws[f"D{linha}"].font = font_negativo
   
               else:
-                  if valor > 0:
-                      ws[f"E{linha}"] = valor
-                      ws[f"E{linha}"].font = font_normal
+                  if tem_credito and tem_debito:
+                      if valor > 0:
+                        ws[f"E{linha}"] = valor
+                        ws[f"E{linha}"].font = font_normal
+                      else:
+                        ws[f"E{linha}"] = valor
+                        ws[f"E{linha}"].font = font_negativo
+                  elif tem_credito:
+                    ws[f"D{linha}"] = valor
+                    ws[f"D{linha}"].font = font_normal
                   else:
-                      ws[f"E{linha}"] = valor
-                      ws[f"E{linha}"].font = font_negativo
+                    ws[f"D{linha}"] = valor
+                    ws[f"D{linha}"].font = font_negativo
 
               ws[f"D{linha}"].alignment = align_right
               ws[f"D{linha}"].number_format = '#,##0.00'
               ws[f"D{linha}"].border = border_thin
 
-              ws[f"E{linha}"].alignment = align_right
-              ws[f"E{linha}"].number_format = '#,##0.00'
-              ws[f"E{linha}"].border = border_thin
+              if "E" in colunas:
+                  ws[f"E{linha}"].alignment = align_right
+                  ws[f"E{linha}"].number_format = '#,##0.00'
+                  ws[f"E{linha}"].border = border_thin
 
               linha += 1
 
