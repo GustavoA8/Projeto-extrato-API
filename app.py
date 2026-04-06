@@ -86,8 +86,7 @@ class BankReportApp(ctk.CTk):
         self.banco_dropdown = ctk.CTkOptionMenu(
             bank_frame,
             variable=self.banco_var,
-            # values=["Itaú", "Santander", "Bradesco"],
-            values=["Itaú"],
+            values=["Itaú", "Santander", "Bradesco"],
             command=self.on_banco_change,
             font=ctk.CTkFont(family="Segoe UI", size=14),
             dropdown_font=ctk.CTkFont(family="Segoe UI", size=13),

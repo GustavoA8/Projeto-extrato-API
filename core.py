@@ -565,7 +565,7 @@ def main_itau(df):
     gerar_excel_itau(
     nome=nomeCond,
     agencia_conta=agenciaContaCond,
-    periodo=dataCond,
+    
 
     saldo_inicial=sdo_inicial,
     saldo_final=sdo_final,
@@ -576,7 +576,8 @@ def main_itau(df):
     debitos=debitos,
     geral=geral,
     arquivo_origem=df.attrs.get("arquivo_origem"),
-    obj = obj
+    obj = obj,
+    periodo=dataCond
     )
 
 def main_santander(df, condominio):
@@ -631,31 +632,13 @@ def main_santander(df, condominio):
 
     
     print("---------------------------------Sheets CONTAMAX----------------------------------------")
-    aplicacao = separador_lancamentos_contamax(obj)
+    aplicacao = separador_lancamentos_aplic(obj)
     lista_aplicacao = []
     lista_resgate = []
     total_aplic = 0
     total_resgate = 0
-    for i in aplicacao:
-        if i["valor"] > 0:
-            lista_resgate.append(i)
-            total_resgate += float(i['valor'])
-        else:
-            lista_aplicacao.append(i)
-            total_aplic += float(i['valor'])
-    print("---------------------------------Aplicação----------------------------------------")
-    for registro in lista_aplicacao:
-        
-        print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
-    print("Qtde: ", len(lista_aplicacao), " Total Aplicações: ", total_aplic.__round__(2))
-    print("---------------------------------Resgate----------------------------------------")
-
-    for registro in lista_resgate:
-        
-        print("Data: ", registro['data'], " Lançamento: ", registro['lancamento'], " Valor: ", registro['valor'], " Saldo: ", registro['saldo'])
-    print("Qtde: ", len(lista_resgate), " Total Resgates: ", total_resgate.__round__(2))
-    print("Resultado Líquido: ", (total_aplic + total_resgate).__round__(2))
-
+   
+ 
     print("---------------------------------Sheets credito----------------------------------------")
     credito = separador_lancamentos_credito(obj)
     total_credito = 0
@@ -673,19 +656,18 @@ def main_santander(df, condominio):
     print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
     geral = separar_lancamentos_geral(obj) 
 
-    gerar_excel_santander(
-            condominio=condominio,
+    gerar_excel_itau(
+    nome=condominio,
+    banco="Santander",
     agencia_conta=agenciaContaCond,
 
-    periodo="Período não identificado",   # ← você ainda não está extraindo data no Santander
 
     saldo_inicial=sdo_inicial,
     saldo_final=sdo_final,
 
     tarifas=tarifa,
 
-    contamax_aplicacoes=lista_aplicacao,
-    contamax_resgates=lista_resgate,
+    aplicacoes=aplicacao,
 
     credito=credito,
 
@@ -783,8 +765,9 @@ def main_bradesco(df, condominio):
         total_debitos += float(registro['valor'])
     print("Qtde: ", len(debitos), " Total Débitos: ", total_debitos.__round__(2))
    
-    gerar_excel_bradesco(
-    condominio=condominio,
+    gerar_excel_itau(
+    nome=condominio,
+    banco="Bradesco",
     agencia_conta=agenciaContaCond,
 
     saldo_inicial=sdo_inicial,
@@ -1119,8 +1102,8 @@ def gerar_excel_bradesco(
 
 def gerar_excel_itau(
     nome,
+    banco,
     agencia_conta,
-    periodo,
     saldo_inicial,
     saldo_final,
     tarifas,
@@ -1129,7 +1112,8 @@ def gerar_excel_itau(
     debitos,
     geral,
     arquivo_origem,
-    obj
+    obj,
+    periodo=None
 ):
     import os
     from openpyxl import Workbook
@@ -1171,6 +1155,12 @@ def gerar_excel_itau(
         top=Side(style="thin", color="000000"),
         bottom=Side(style="thin", color="000000")
     )
+    borda_esquerda = Border(
+        left=Side(style="thin", color="000000"),
+        right=None,
+        top=None,
+        bottom=None
+    )
 
     def configurar_impressao(ws, ultima_linha):
         # 📄 Papel A4
@@ -1205,12 +1195,19 @@ def gerar_excel_itau(
         debitos_lista = [x for x in lista if float(x["valor"]) < 0]
         ws = wb.create_sheet(nome_aba)
         ws.sheet_view.showGridLines = False
-        img = Image(resource_path("img/itau_header.png"))
+        if banco == "Itau":
+            img = Image(resource_path("img/itau_header.png"))
+        elif banco == "Santander":
+            img = Image(resource_path("img/santander_header.png"))
+        else:
+            img = Image(resource_path("img/logo_bradesco.png"))
+            img.width = 120   # largura
+            img.height = 80   # altura
         ws.add_image(img, 'B1')
         
         # Logo/Cabeçalho
         ws.merge_cells('B2:C2')
-        ws['B2'] = 'Itaú'
+        ws['B2'] = banco
         ws['B2'].font = Font(name='Arial', bold=True, size=14, color="0066CC")
         ws['B2'].alignment = align_left
         
@@ -1226,9 +1223,9 @@ def gerar_excel_itau(
         ws['D5'].font = font_titulo
         ws['D5'].alignment = align_center
         ws['D5'].fill = PatternFill(fill_type='solid', start_color='1f497d')
-        ws['E5'] = agencia_conta
-        ws['E5'].font = font_normal
-        ws['E5'].border = borda_simples
+        ws['D6'] = agencia_conta
+        ws['D6'].font = font_normal
+        ws['D6'].border = borda_simples
         
         ws['B6'] = 'Data:'
         ws['B6'].font = font_titulo
@@ -1331,6 +1328,7 @@ def gerar_excel_itau(
 
                   ws[f"D{linha}"] = valor
                   ws[f"D{linha}"].font = font_negativo
+                  
   
               else:
                   if tem_credito and tem_debito:
@@ -1376,7 +1374,7 @@ def gerar_excel_itau(
           ws[f"D{linha}"].fill = fill_total
           ws[f"D{linha}"].border = border_thin
 
-          if nome_aba != "Tarifas":
+          if nome_aba != "Tarifas" and nome_aba != "Geral":
               ws[f"E{linha}"] = f'=SUM(E{linha_inicio_dados}:E{linha-1})'
               ws[f"E{linha}"].font = font_total
               ws[f"E{linha}"].alignment = align_right
@@ -1420,6 +1418,8 @@ def gerar_excel_itau(
         ws.column_dimensions["C"].width = 50
         ws.column_dimensions["D"].width = 18
         ws.column_dimensions["E"].width = 18
+        if nome_aba == "Tarifas":
+            ws.column_dimensions["E"].width = 8
 
         #configuração de impressão
 
@@ -1438,12 +1438,17 @@ def gerar_excel_itau(
 
          ws = wb.create_sheet(nome_aba)
          ws.sheet_view.showGridLines = False
-         img = Image(resource_path("img/itau_header.png"))
+         if banco == "Itau":
+             img = Image(resource_path("img/itau_header.png"))
+         elif banco == "Santander":
+             img = Image(resource_path("img/santander_header.png"))
+         else:
+             img = Image(resource_path("img/logo_bradesco.png"))
          ws.add_image(img, 'B1')
 
          # Cabeçalho Itaú
          ws.merge_cells('B2:C2')
-         ws['B2'] = 'Itaú'
+         ws['B2'] = banco
          ws['B2'].font = Font(name='Arial', bold=True, size=14, color="0066CC")
          ws['B2'].alignment = align_left
 
@@ -1482,13 +1487,28 @@ def gerar_excel_itau(
 
          linha = 12
 
+        
+         
          for nome_grupo, lista in grupos_dict.items():
+             
+             
+             
+             celula = posicaoIndefinido.get(nome_grupo)
 
              # 🔹 Título do grupo
-             ws.merge_cells(f'B{linha}:E{linha}')
-             ws[f'B{linha}'] = f'GRUPO: {nome_grupo}'
+             if not "AUTOMATICA" in nome_grupo:
+                ws.merge_cells(f'B{linha}:E{linha}')
+             else:
+                ws.merge_cells(f'B{linha}:D{linha}')
+                ws[f'E{linha}'].border = Border(left=None, right=None, top=None, bottom=None)
+             ws[f'B{linha}'] = (
+              f'="GRUPO: "&Resumo!{celula}'
+              if celula
+              else f'GRUPO: {nome_grupo}'
+            )
              ws[f'B{linha}'].font = Font(name='Arial', bold=True, size=10)
              ws[f'B{linha}'].alignment = align_left
+            
              linha += 1
 
              # 🔹 Cabeçalho tabela
@@ -1496,6 +1516,15 @@ def gerar_excel_itau(
              if nome_aba == "Aplicacoes":
                 headers = ["Data", "Lançamento", "Aplicação (R$)", "Resgate (R$)"]
              colunas = ["B", "C", "D", "E"]
+
+             if "AUTOMATICA" in nome_grupo:
+                headers = ["Data", "Lançamento", "Rendimento"]
+                colunas = ["B", "C", "D"]
+                 
+                 
+
+             
+
 
              for col, texto in zip(colunas, headers):
                  cell = ws[f"{col}{linha}"]
@@ -1512,7 +1541,7 @@ def gerar_excel_itau(
                  ws[f"B{linha}"] = "Sem registros"
                  ws[f"B{linha}"].font = Font(name='Arial', italic=True, size=10)
                  linha += 2
-                 continue
+                
 
              for reg in lista:
 
@@ -1527,8 +1556,9 @@ def gerar_excel_itau(
                  ws[f"C{linha}"].font = font_normal
                  ws[f"C{linha}"].alignment = align_left
                  ws[f"C{linha}"].border = border_thin
+                 
 
-                 if valor < 0:
+                 if valor < 0 and not "AUTOMATICA" in nome_grupo :
                      ws[f"D{linha}"] = valor
                      
                  ws[f"D{linha}"].font = font_negativo 
@@ -1536,12 +1566,20 @@ def gerar_excel_itau(
                  ws[f"D{linha}"].number_format = '#,##0.00'
                  ws[f"D{linha}"].border = border_thin
 
-                 if valor > 0:
+                 if valor > 0 and not "AUTOMATICA" in nome_grupo:
                      ws[f"E{linha}"] = valor
                  ws[f"E{linha}"].font = font_normal
                  ws[f"E{linha}"].alignment = align_right
                  ws[f"E{linha}"].number_format = '#,##0.00'
                  ws[f"E{linha}"].border = border_thin
+
+                 if "AUTOMATICA" in nome_grupo:
+                    ws[f"D{linha}"] = valor
+                    ws[f"D{linha}"].font = font_normal
+                    ws[f"D{linha}"].alignment = align_right
+                    ws[f"D{linha}"].number_format = '#,##0.00'
+                    ws[f"D{linha}"].border = border_thin
+                    ws[f"E{linha}"].border = borda_esquerda
 
                  linha += 1
 
@@ -1562,18 +1600,21 @@ def gerar_excel_itau(
              ws[f"D{linha}"].border = border_thin
              aplicacaoTotal = "D" + str(linha)
 
-             ws[f"E{linha}"] = f'=SUM(E{linha_inicio_dados}:E{linha-1})'
-             ws[f"E{linha}"].font = font_total
-             ws[f"E{linha}"].alignment = align_right
-             ws[f"E{linha}"].number_format = '#,##0.00'
-             ws[f"E{linha}"].fill = fill_total
-             ws[f"E{linha}"].border = border_thin
-             resgateTotal = "E" + str(linha)
+             if not "AUTOMATICA" in nome_grupo:
+                ws[f"E{linha}"] = f'=SUM(E{linha_inicio_dados}:E{linha-1})'
+                ws[f"E{linha}"].font = font_total
+                ws[f"E{linha}"].alignment = align_right
+                ws[f"E{linha}"].number_format = '#,##0.00'
+                ws[f"E{linha}"].fill = fill_total
+                ws[f"E{linha}"].border = border_thin
+                resgateTotal = "E" + str(linha)
 
              # ======================================================
              # SALDOS (APENAS PARA ABA APLICACOES)
              # ======================================================
-             if nome_aba == "Aplicacoes" and mapa_saldos_resumo:
+             if nome_aba == "Aplicacoes" and mapa_saldos_resumo and not ("AUTOMATICA" in nome_grupo):
+                 
+                 
                  print(f"Calculando saldos para o grupo '{nome_grupo}'...")
 
                  saldoInicial = mapa_saldos_resumo[nome_grupo]["saldo_inicial"]
@@ -1616,10 +1657,13 @@ def gerar_excel_itau(
                  ws[f'E{linha}'].number_format = '#,##0.00'
                  ws[f"E{linha}"].border = border_thin
 
-                 linha += 2             
-             ws[f'E{linha}'].font = font_normal
-             ws[f'E{linha}'].number_format = '#,##0.00'
-             ws[f"E{linha}"].border = border_thin
+                 linha += 2 
+             if "AUTOMATICA" in nome_grupo:
+                linha += 2
+             else:
+               ws[f'E{linha}'].font = font_normal
+               ws[f'E{linha}'].number_format = '#,##0.00'
+               ws[f"E{linha}"].border = border_thin
 
          ws.column_dimensions["B"].width = 12
          ws.column_dimensions["C"].width = 50
@@ -1629,8 +1673,20 @@ def gerar_excel_itau(
          configurar_impressao(ws, linha)
      
     # ========== ABA RESUMO ==========
-    aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Itau")
-    
+    if banco == "Itau":
+        aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Itau")
+        if "CDB" not in aplicacoes_por_grupo:
+            aplicacoes_por_grupo["CDB"] = []
+        aplicacoes_por_grupo["Indefinido"] = []
+        aplicacoes_por_grupo["Indefinido2"] = []
+    elif banco == "Santander":
+        aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Santander")
+        aplicacoes_por_grupo["Indefinido"] = []
+        aplicacoes_por_grupo["Indefinido2"] = []
+    else:
+        aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Bradesco")
+        aplicacoes_por_grupo["Indefinido"] = []
+        aplicacoes_por_grupo["Indefinido2"] = []
 
     ws = wb.active
     ws.title = "Resumo"
@@ -1640,7 +1696,12 @@ def gerar_excel_itau(
 
     
     ws.merge_cells('B2:C2')
-    img = Image(resource_path("img/itau_header.png"))
+    if banco == "Itau":
+        img = Image(resource_path("img/itau_header.png"))
+    elif banco == "Santander":
+        img = Image(resource_path("img/santander_header.png"))
+    else:
+        img = Image(resource_path("./img/logo_bradesco.png"))
     ws.add_image(img, 'B1')
     ws.row_dimensions[2].height = 40
     ws.column_dimensions['B'].width = 50
@@ -1742,6 +1803,7 @@ def gerar_excel_itau(
     
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 30
+    
 
     linha_resumo = 18  # começa depois da parte que já existe
 
@@ -1753,8 +1815,19 @@ def gerar_excel_itau(
     ws.merge_cells(f"B{linha_resumo}:C{linha_resumo}")
 
     linha_resumo += 2
+    posicaoIndefinido = {}
+
 
     for nome_grupo in aplicacoes_por_grupo.keys():
+
+        if "AUTOMATICA" in nome_grupo:
+            continue
+
+        if "Indefinido" in nome_grupo:
+            posicaoIndefinido[nome_grupo] = f"B{linha_resumo}"
+        if "Indefinido2" in nome_grupo:
+            posicaoIndefinido[nome_grupo] = f"B{linha_resumo}"
+        
 
         # 🔹 Nome da aplicação
         ws[f"B{linha_resumo}"] = nome_grupo
@@ -1809,7 +1882,7 @@ def gerar_excel_itau(
         del wb["Sheet"]
     
     wb.save(caminho)
-    print(f"Arquivo Itaú estilizado gerado: {caminho}")
+    print(f"Arquivo {banco} estilizado gerado: {caminho}")
 
 def gerar_excel_santander(
     condominio,
