@@ -1,3 +1,4 @@
+from decimal import Decimal
 import os
 import sys
 import pandas as pd
@@ -55,12 +56,15 @@ def carregar_mapa_grupos(banco):
 
     return dict(zip(df_mapa["Descrição"], df_mapa["Grupo"]))
 
-def separar_por_grupo(obj, banco):
+def separar_por_grupo(obj, banco, invest_obj=None):
 
     mapeamento = carregar_mapa_grupos(banco)
 
     aplicacoes_por_grupo = {}
     lancamentos_gerais = []
+    print("Iniciando separação por grupo...")
+    print(f"OBJ -> {obj}")
+    print(f"INVEST_OBJ -> {invest_obj}")
 
     for reg in obj:
 
@@ -79,6 +83,11 @@ def separar_por_grupo(obj, banco):
             aplicacoes_por_grupo[grupo_encontrado].append(reg)
         elif 'tar' not in descricao.lower():
             lancamentos_gerais.append(reg)
+    # ✅ GARANTE QUE O GRUPO EXISTE
+    aplicacoes_por_grupo.setdefault("SALDO INVEST", [])
+    for reg in invest_obj:
+        aplicacoes_por_grupo["SALDO INVEST"].append(reg)
+        print(f"Processando investimento: {reg}")
 
     return aplicacoes_por_grupo, lancamentos_gerais
 
@@ -338,6 +347,89 @@ def padronizar_extrato_bradesco(df):
 
     return novo.dropna(how='all')
 
+def invest_facil_bradesco(df):
+     # 1 - achar linha do cabeçalho
+    h = None
+    linhaInvest = localizar_texto_df(df, 'Saldos Invest Fácil / Plus')
+    print(f"Linha Invest Fácil: {linhaInvest[0][0]}")
+    if not linhaInvest:
+        print("Não achou 'Invest Fácil'")
+        return None
+
+    linha_inicio = linhaInvest[0][0]
+
+    for i, linha in df.iloc[linha_inicio:].iterrows():
+        textos = [str(v).lower() for v in linha if pd.notna(v)]
+
+        if "data" in " ".join(textos) and "valor" in " ".join(textos):
+            h = i
+            break
+
+    if h is None:
+        print("Não achei linha de cabeçalho Bradesco")
+        return None
+    
+    
+    header = df.iloc[h]
+    with open("saida.txt", "w", encoding="utf-8") as arquivo:
+     arquivo.write(str(header))
+    # 2 - mapear colunas
+    col_data = None
+    col_lanc = None
+    col_val = None
+
+    for j, v in header.items():
+        if pd.isna(v):
+            continue
+
+        v = str(v).lower()
+
+        if "data" in v:
+            col_data = j
+
+        elif "lan" in v or "hist" in v:
+            col_lanc = j
+    
+        elif "valor" in v:
+            col_val = j
+
+
+    if None in (col_data, col_lanc, col_val):
+        print("Mapeamento falhou Bradesco:",
+              col_data, col_lanc, col_val)
+        return None
+
+
+    # 3 - achar linha TOTAL
+    linha_fim = None
+
+    for i in range(h, len(df)):
+        linha = df.iloc[i]
+
+        if linha.dropna().empty:
+            linha_fim = i
+            break
+
+    # se não achou linha vazia, pega até o final
+    if linha_fim is None:
+       linha_fim = len(df)
+
+
+    dados = df.iloc[h+1 : linha_fim].copy()
+
+
+
+
+    # 5 - montar dataframe final
+    novo = pd.DataFrame({
+        "Data": dados[ col_data],
+        "Lançamento": dados[ col_lanc],
+        "Valor": dados[col_val]
+    })
+
+
+    return novo.dropna(how='all')
+
 def converter_valor_br(valor):
     if pd.isna(valor):
         return 0.0
@@ -352,7 +444,7 @@ def converter_valor_br(valor):
     except:
         return 0.0
 
-def extrato_para_obj(df):
+def extrato_para_obj(df,banco=None):
     extrato = []
 
     for i, linha in df.iterrows():
@@ -360,7 +452,7 @@ def extrato_para_obj(df):
             "data": linha["Data"],
             "lancamento": linha["Lançamento"],
             "valor": linha["Valor"],
-            "saldo": linha["Saldo"],
+            "saldo": None if banco == "Bradesco" else linha["Saldo"]
         }
         extrato.append(registro)
             
@@ -669,7 +761,7 @@ def main_santander(df, condominio):
 
     aplicacoes=aplicacao,
 
-    credito=credito,
+    creditos=credito,
 
     debitos=debitos,
     geral=geral,
@@ -682,6 +774,7 @@ def main_bradesco(df, condominio):
     
     print("---------------------------------Sheets SALDOS----------------------------------------")
     print(df)
+    print("INEVST FACIL: ", localizar_texto_df(df, 'Saldos Invest Fácil / Plus'))
     agenciaConta_loc = localizar_texto_df(df, 'Agência/Conta:')
     if not agenciaConta_loc:
         agencia_loc = localizar_texto_df(df, 'Agência:')
@@ -708,7 +801,7 @@ def main_bradesco(df, condominio):
 
     saldoAnt_loc = localizar_texto_df(df, 'Saldo Anterior')
     print(saldoAnt_loc)
-
+    saldoAntCond = 0
     for linha, coluna, valor in saldoAnt_loc:
         saldoAntCond = pegar_valor_cabecalho(df, linha, coluna)
         print(f"Saldo Anterior encontrado: {valor}, Valor após: {saldoAntCond}")
@@ -730,6 +823,36 @@ def main_bradesco(df, condominio):
     print("---------------------------------Sheets Tarifas----------------------------------------")
     print("Extrato:")
     extrato_df = padronizar_extrato_bradesco(df)
+    invest = invest_facil_bradesco(df)
+    print("Invest Fácil:")
+    
+    dataTemp = invest.iloc[-1]['Data']
+    nova_linha = {
+        "Data": "01"+ dataTemp[2:],
+        "Lançamento": "SALDO ANTERIOR",
+        "Valor": str(saldoAntCond)
+    }
+    
+    invest = pd.concat([pd.DataFrame([nova_linha]), invest], ignore_index=True)
+    val = 0
+    cont = 0
+    for _, row in invest.iterrows():
+        # print(f"Data: {row['Data']}, Lançamento: {row['Lançamento']}, Valor: {row['Valor']}")
+        print("Valor:", row['Valor'])
+        if  val is None:
+            val = - Decimal(row['Valor'].replace('.', '').replace(',', '.'))
+
+            continue
+        novo_valor = val - Decimal(row['Valor'].replace('.', '').replace(',', '.')) 
+        invest.at[cont, 'Valor'] = str(novo_valor) 
+        val = Decimal(row['Valor'].replace('.', '').replace(',', '.'))
+        cont+=1
+    for _, row in invest.iterrows():
+        print(f"Data: {row['Data']}, Lançamento: {row['Lançamento']}, Valor: {row['Valor']}")
+        
+    invest = invest.iloc[1:].reset_index(drop=True)
+
+    obj_invest = extrato_para_obj(invest, "Bradesco")
     obj = extrato_para_obj(extrato_df)
     tarifa = separador_lancamentos_tar(obj)
     total = 0
@@ -778,7 +901,8 @@ def main_bradesco(df, condominio):
     debitos=debitos,
     geral=geral,
     arquivo_origem=df.attrs.get("arquivo_origem"),
-    obj = obj
+    obj = obj,
+    invest = obj_invest
     )
 
 def gerar_excel(
@@ -794,7 +918,8 @@ def gerar_excel(
     geral,
     arquivo_origem,
     obj,
-    periodo=None
+    periodo=None,
+    invest=None
 ):
     import os
     from openpyxl import Workbook
@@ -803,6 +928,7 @@ def gerar_excel(
     from utils import resource_path
 
     wb = Workbook()
+    print("Iniciando geração do arquivo Excel...")
 
     base = os.path.basename(arquivo_origem)
     nome_sem_ext, ext = os.path.splitext(base)
@@ -1115,7 +1241,7 @@ def gerar_excel(
 
         configurar_impressao(ws, linha)
 
-    def montar_aba_grupos(nome_aba, grupos_dict, titulo_secao, mapa_saldos_resumo=None):
+    def montar_aba_grupos(nome_aba, grupos_dict, titulo_secao, mapa_saldos_resumo=None,invest=None):
 
          ws = wb.create_sheet(nome_aba)
          ws.sheet_view.showGridLines = False
@@ -1173,7 +1299,7 @@ def gerar_excel(
          for nome_grupo, lista in grupos_dict.items():
              
              
-             
+             print(f"Processando grupo: {nome_grupo}")
              celula = posicaoIndefinido.get(nome_grupo)
 
              # 🔹 Título do grupo
@@ -1186,7 +1312,7 @@ def gerar_excel(
               f'="GRUPO: "&Resumo!{celula}'
               if celula
               else f'GRUPO: {nome_grupo}'
-            )
+             )
              ws[f'B{linha}'].font = Font(name='Arial', bold=True, size=10)
              ws[f'B{linha}'].alignment = align_left
             
@@ -1225,6 +1351,7 @@ def gerar_excel(
                 
 
              for reg in lista:
+                 print(f"Processando registro: {reg}")
 
                  valor = float(reg["valor"])
 
@@ -1293,9 +1420,13 @@ def gerar_excel(
              # ======================================================
              # SALDOS (APENAS PARA ABA APLICACOES)
              # ======================================================
-             if nome_aba == "Aplicacoes" and mapa_saldos_resumo and not ("AUTOMATICA" in nome_grupo):
+             if nome_aba == "Aplicacoes" and mapa_saldos_resumo :
+                 if nome_grupo not in mapa_saldos_resumo:
+                  print(f"[IGNORADO] Grupo sem saldo no resumo: {nome_grupo}")
+                  continue
+          
                  
-                 
+                 print(mapa_saldos_resumo)
                  print(f"Calculando saldos para o grupo '{nome_grupo}'...")
 
                  saldoInicial = mapa_saldos_resumo[nome_grupo]["saldo_inicial"]
@@ -1339,20 +1470,30 @@ def gerar_excel(
                  ws[f"E{linha}"].border = border_thin
 
                  linha += 2 
+                 print("chegou aqui 1")
              if "AUTOMATICA" in nome_grupo:
                 linha += 2
+                print("chegou 1.5")
              else:
                ws[f'E{linha}'].font = font_normal
                ws[f'E{linha}'].number_format = '#,##0.00'
                ws[f"E{linha}"].border = border_thin
-
+               print("chegou 1.7")
+         
+         print("chegou aqui 1.8")
          ws.column_dimensions["B"].width = 12
          ws.column_dimensions["C"].width = 50
+         print("chegou aqui 2")
+         if banco == "Santander":
+             ws.column_dimensions["C"].width = 75
+         print("chegou aqui 2.5")
          ws.column_dimensions["D"].width = 18
          ws.column_dimensions["E"].width = 18
+         print("chegou aqui 3")
 
          configurar_impressao(ws, linha)
-     
+    
+    
     # ========== ABA RESUMO ==========
     if banco == "Itau":
         aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Itau")
@@ -1365,7 +1506,10 @@ def gerar_excel(
         aplicacoes_por_grupo["Indefinido"] = []
         aplicacoes_por_grupo["Indefinido2"] = []
     else:
-        aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Bradesco")
+        aplicacoes_por_grupo, lancamentos_gerais = separar_por_grupo(obj, "Bradesco",invest)
+        print("chegou aqui 3.5")
+        print(f"Processando investimentos para o banco {banco}")
+        print("Aplicações por grupo:", aplicacoes_por_grupo)
         aplicacoes_por_grupo["Indefinido"] = []
         aplicacoes_por_grupo["Indefinido2"] = []
 
@@ -1498,10 +1642,10 @@ def gerar_excel(
     linha_resumo += 2
     posicaoIndefinido = {}
 
-
+    
     for nome_grupo in aplicacoes_por_grupo.keys():
 
-        if "AUTOMATICA" in nome_grupo:
+        if "AUTOMATICA" in nome_grupo :
             continue
 
         if "Indefinido" in nome_grupo:
@@ -1556,7 +1700,7 @@ def gerar_excel(
 
     # ========== CRIAR ABAS ==========
     montar_aba("Tarifas", tarifas, "APURAÇÃO TARIFAS BANCÁRIAS")
-    montar_aba_grupos("Aplicacoes",aplicacoes_por_grupo , "APLICAÇÕES", mapa_saldos_resumo)
+    montar_aba_grupos("Aplicacoes",aplicacoes_por_grupo , "APLICAÇÕES", mapa_saldos_resumo, invest)
     montar_aba("Geral", lancamentos_gerais, "GERAL")
     
     if "Sheet" in wb.sheetnames:
