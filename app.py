@@ -4,12 +4,12 @@ from PIL import Image, ImageTk
 import os
 
 # ===== IMPORTA SEU CÓDIGO =====
-from core import (
-    read_with_fallback,
-    main_itau,
-    main_santander,
-    main_bradesco
+from core.reader import (
+    read_with_fallback
 )
+
+
+from services.processador import processar_arquivo
 
 # Configurações de tema
 ctk.set_appearance_mode("dark")
@@ -86,7 +86,7 @@ class BankReportApp(ctk.CTk):
         self.banco_dropdown = ctk.CTkOptionMenu(
             bank_frame,
             variable=self.banco_var,
-            values=["Itaú", "Santander", "Bradesco"],
+            values=["Itau", "Santander", "Bradesco"],
             command=self.on_banco_change,
             font=ctk.CTkFont(family="Segoe UI", size=14),
             dropdown_font=ctk.CTkFont(family="Segoe UI", size=13),
@@ -236,6 +236,8 @@ class BankReportApp(ctk.CTk):
     
     def gerar(self):
         """Processa e gera o relatório"""
+        print("Iniciando geração do relatório...")
+        print("Caminho: ", self.arquivo_selecionado)
         
         # Validações
         if not self.arquivo_selecionado:
@@ -271,18 +273,12 @@ class BankReportApp(ctk.CTk):
             df = read_with_fallback(self.arquivo_selecionado)
             df.attrs["arquivo_origem"] = self.arquivo_selecionado
             
-            # Processa conforme o banco
-            if banco == "Itaú":
-                main_itau(df)
-                mensagem = "Relatório do Itaú gerado com sucesso! ✅"
-                   
-            elif banco == "Santander":
-                main_santander(df, condominio)
-                mensagem = "Relatório do Santander gerado com sucesso! ✅"
-                
-            elif banco == "Bradesco":
-                main_bradesco(df, condominio)
-                mensagem = "Relatório do Bradesco gerado com sucesso! ✅"
+            processar_arquivo(
+                df=df,
+                banco=banco.lower(),
+                condominio=condominio
+            )           
+            mensagem = "Relatório gerado com sucesso! ✅"
             
             # Sucesso
             messagebox.showinfo("Sucesso", mensagem)
